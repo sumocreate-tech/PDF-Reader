@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="PDFリーダー">
-<title>ローカルPDFビューア</title>
+<meta name="apple-mobile-web-app-title" content="マンガリーダー">
+<title>ローカル本・画像リーダー</title>
 <style>
   :root {
     --bg: #111;
@@ -54,7 +54,7 @@
     font-size: 14px;
     padding: 10px 20px;
   }
-  #file-input { display: none; }
+  input[type="file"] { display: none; }
   .note { font-size: 12px; color: #999; max-width: 400px; line-height: 1.5; }
 
   /* ビューア画面 */
@@ -64,7 +64,7 @@
     width: 100%;
     height: 100%;
   }
-  #canvas-container {
+  #media-container {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -73,19 +73,27 @@
     gap: 2px;
   }
   /* 見開き（右綴じ: 右が先、左が次） */
-  #canvas-container.rtl { flex-direction: row-reverse; }
-  #canvas-container.ltr { flex-direction: row; }
+  #media-container.rtl { flex-direction: row-reverse; }
+  #media-container.ltr { flex-direction: row; }
 
-  canvas {
+  .page-slot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    max-width: 100%;
+  }
+  .spread-mode .page-slot {
+    max-width: 50%;
+  }
+
+  canvas, img.page-img {
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
-    background: #fff;
     box-shadow: 0 0 15px rgba(0,0,0,0.8);
   }
-  .spread-mode canvas {
-    max-width: 50%;
-  }
+  canvas { background: #fff; }
 
   /* タップ領域 */
   .tap-zone {
@@ -147,12 +155,11 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 55%;
+    max-width: 50%;
   }
   #page-slider {
     width: 100%;
     accent-color: var(--accent);
-    /* 右綴じ用にスライダーを反転させる */
   }
   #page-slider.rtl { direction: rtl; }
   #loading {
@@ -172,15 +179,15 @@
 
   <!-- セットアップ画面 -->
   <div id="setup-screen">
-    <h2>PDFマンガ・本リーダー</h2>
-    <p class="note" id="engine-status">PDFエンジン確認中...</p>
+    <h2>マンガ・画像・PDFリーダー</h2>
+    <p class="note" id="engine-status">準備中...</p>
     <button class="btn" id="select-folder-btn">フォルダを選択して開く</button>
     <button class="btn btn-sub" id="select-files-btn">複数ファイルを選択</button>
     <input type="file" id="folder-input" webkitdirectory directory multiple>
-    <input type="file" id="files-input" accept="application/pdf" multiple>
+    <input type="file" id="files-input" accept="image/*,.webp,.avif,.pdf,application/pdf" multiple>
     <p class="note">
-      ※オフラインでホーム画面から使う場合は、最初に1度ネット接続状態で開いてエンジンをキャッシュさせてください。<br>
-      ※iOS等でフォルダ選択が出ない場合は「複数ファイルを選択」から全選択してください。
+      対応形式: WebP / JPG / PNG / GIF / AVIF / BMP / SVG / PDF<br>
+      ※画像のみならオフラインでも即動作します。PDFも使う場合は初回のみネット接続状態で開いてキャッシュさせてください。
     </p>
   </div>
 
@@ -195,9 +202,15 @@
       </div>
     </div>
 
-    <div id="canvas-container" class="rtl">
-      <canvas id="canvas-1"></canvas>
-      <canvas id="canvas-2" style="display:none;"></canvas>
+    <div id="media-container" class="rtl">
+      <div class="page-slot" id="slot-1">
+        <canvas id="canvas-1" style="display:none;"></canvas>
+        <img id="img-1" class="page-img" style="display:none;" alt="">
+      </div>
+      <div class="page-slot" id="slot-2" style="display:none;">
+        <canvas id="canvas-2" style="display:none;"></canvas>
+        <img id="img-2" class="page-img" style="display:none;" alt="">
+      </div>
     </div>
 
     <div id="tap-left" class="tap-zone"></div>
@@ -218,15 +231,13 @@
 <script>
 /**
  * 1. オフライン対応 (Service Worker & Manifest の動的生成)
- * 単一HTMLファイルのままPWA化し、PDF.js本体をCache APIに保存してオフライン動作させる
  */
 const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
 const PDFJS_WORKER_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-// Web App Manifest 動的付与（ホーム画面追加時のフルスクリーン化）
 const manifest = {
-  name: "PDFリーダー",
-  short_name: "PDFリーダー",
+  name: "マンガ・画像リーダー",
+  short_name: "リーダー",
   display: "standalone",
   background_color: "#111111",
   theme_color: "#111111",
@@ -238,10 +249,9 @@ manifestLink.rel = 'manifest';
 manifestLink.href = URL.createObjectURL(manifestBlob);
 document.head.appendChild(manifestLink);
 
-// Service Worker 登録（HTTPS または localhost 環境で有効）
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   const swCode = `
-    const CACHE_NAME = 'pdf-reader-v1';
+    const CACHE_NAME = 'media-reader-v2';
     const ASSETS = [self.location.href, '${PDFJS_CDN}', '${PDFJS_WORKER_CDN}'];
     self.addEventListener('install', e => {
       e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -264,19 +274,20 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
   navigator.serviceWorker.register(URL.createObjectURL(swBlob)).catch(() => {});
 }
 
-// PDF.js の動的ロード
+let pdfJsReady = false;
 function loadPdfJs() {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const script = document.createElement('script');
     script.src = PDFJS_CDN;
     script.onload = () => {
       pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_CDN;
-      document.getElementById('engine-status').textContent = '準備完了（オフラインキャッシュ対応）';
+      pdfJsReady = true;
+      document.getElementById('engine-status').textContent = '準備完了（画像・PDF両対応 / オフラインキャッシュ済）';
       resolve();
     };
     script.onerror = () => {
-      document.getElementById('engine-status').textContent = '※初回のみネット接続が必要です';
-      reject();
+      document.getElementById('engine-status').textContent = '準備完了（画像モード ※PDF読込には初回ネット接続が必要）';
+      resolve();
     };
     document.head.appendChild(script);
   });
@@ -284,69 +295,77 @@ function loadPdfJs() {
 loadPdfJs();
 
 /**
- * 2. PDFリーダーのコアロジック（軽量・メモリ節約設計）
+ * 2. 画像 + PDF 統合リーダーロジック
  */
-let pagesList = []; // { file: File, fileName: string, pageNum: number, pdfDoc: PDFDocumentProxy }
+const IMAGE_EXTS = /\.(webp|jpe?g|png|gif|avif|bmp|svg|ico)$/i;
+const PDF_EXT = /\.pdf$/i;
+
+let pagesList = []; // { type: 'image' | 'pdf', file: File, fileName: string, pageNum?: number }
 let currentIndex = 0;
-let isSpread = false; // false: 1ページ表示, true: 2ページ見開き
-let isRtl = true;     // true: 右綴じ(マンガ標準), false: 左綴じ
-let renderTask1 = null;
-let renderTask2 = null;
-let cachedDocs = new Map(); // メモリ圧迫を防ぐため直近数ファイルのみ保持
+let isSpread = false;
+let isRtl = true;
+let cachedDocs = new Map();
+let activeObjectUrls = []; // メモリリーク防止用のURL管理
 
 const setupScreen = document.getElementById('setup-screen');
 const viewerScreen = document.getElementById('viewer-screen');
-const container = document.getElementById('canvas-container');
-const canvas1 = document.getElementById('canvas-1');
-const canvas2 = document.getElementById('canvas-2');
-const ctx1 = canvas1.getContext('2d', { alpha: false });
-const ctx2 = canvas2.getContext('2d', { alpha: false });
+const container = document.getElementById('media-container');
 const loadingEl = document.getElementById('loading');
 const slider = document.getElementById('page-slider');
 
-// ファイル選択イベント
 document.getElementById('select-folder-btn').onclick = () => document.getElementById('folder-input').click();
 document.getElementById('select-files-btn').onclick = () => document.getElementById('files-input').click();
 document.getElementById('folder-input').onchange = handleFiles;
 document.getElementById('files-input').onchange = handleFiles;
 
+function isSupportedFile(file) {
+  // 隠しファイル（Macの .DS_Store や ._ で始まるリソースフォーク）を除外
+  if (file.name.startsWith('.')) return false;
+  return IMAGE_EXTS.test(file.name) || PDF_EXT.test(file.name) || file.type.startsWith('image/') || file.type === 'application/pdf';
+}
+
 async function handleFiles(e) {
-  const rawFiles = Array.from(e.target.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+  const rawFiles = Array.from(e.target.files).filter(isSupportedFile);
   if (rawFiles.length === 0) {
-    alert('PDFファイルが見つかりませんでした。');
+    alert('対応する画像またはPDFファイルが見つかりませんでした。');
     return;
   }
 
-  // 自然順ソート (1.pdf, 2.pdf, 10.pdf の順に並ぶようにする)
+  // 自然順ソート (01.webp, 2.webp, 10.webp の順に並ぶ)
   rawFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
 
   setupScreen.style.display = 'none';
   viewerScreen.style.display = 'block';
   loadingEl.style.display = 'block';
-  loadingEl.textContent = `PDF解析中 (0 / ${rawFiles.length})...`;
 
   pagesList = [];
   cachedDocs.clear();
+  clearObjectUrls();
 
-  // 全PDFの総ページ数を軽量スキャンしてフラットなページ配列を作成
   for (let i = 0; i < rawFiles.length; i++) {
     const file = rawFiles[i];
-    loadingEl.textContent = `PDF解析中 (${i + 1} / ${rawFiles.length})...`;
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const doc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      for (let p = 1; p <= doc.numPages; p++) {
-        pagesList.push({ file, fileName: file.name, pageNum: p });
+    if (PDF_EXT.test(file.name) || file.type === 'application/pdf') {
+      if (!pdfJsReady) continue;
+      loadingEl.textContent = `ファイル解析中 (${i + 1} / ${rawFiles.length})...`;
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const doc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        for (let p = 1; p <= doc.numPages; p++) {
+          pagesList.push({ type: 'pdf', file, fileName: file.name, pageNum: p });
+        }
+        doc.destroy();
+      } catch (err) {
+        console.error('PDF読込失敗:', file.name, err);
       }
-      doc.destroy(); // メモリ解放
-    } catch (err) {
-      console.error('読込失敗:', file.name, err);
+    } else {
+      // 画像ファイルはスキャン不要で即リスト化（超高速）
+      pagesList.push({ type: 'image', file, fileName: file.name });
     }
   }
 
   loadingEl.style.display = 'none';
   if (pagesList.length === 0) {
-    alert('読み込めるPDFがありませんでした。');
+    alert('読み込めるファイルがありませんでした。');
     resetToSetup();
     return;
   }
@@ -356,11 +375,13 @@ async function handleFiles(e) {
   renderCurrentView();
 }
 
-// 必要なPDFドキュメントだけをオンデマンド取得（最大3ファイルまでキャッシュ）
+function clearObjectUrls() {
+  activeObjectUrls.forEach(url => URL.revokeObjectURL(url));
+  activeObjectUrls = [];
+}
+
 async function getPdfDoc(file) {
-  if (cachedDocs.has(file.name)) {
-    return cachedDocs.get(file.name);
-  }
+  if (cachedDocs.has(file.name)) return cachedDocs.get(file.name);
   if (cachedDocs.size >= 3) {
     const oldestKey = cachedDocs.keys().next().value;
     cachedDocs.get(oldestKey).destroy();
@@ -372,42 +393,57 @@ async function getPdfDoc(file) {
   return doc;
 }
 
-// 画面サイズに合わせて最適な解像度でCanvasに描画
-async function renderPageToCanvas(pageItem, canvas, ctx, isHalfWidth) {
+async function renderSlot(slotNum, pageItem, isHalfWidth) {
+  const slot = document.getElementById(`slot-${slotNum}`);
+  const canvas = document.getElementById(`canvas-${slotNum}`);
+  const img = document.getElementById(`img-${slotNum}`);
+
   if (!pageItem) {
+    slot.style.display = 'none';
     canvas.style.display = 'none';
+    img.style.display = 'none';
     return;
   }
-  canvas.style.display = 'block';
-  const doc = await getPdfDoc(pageItem.file);
-  const page = await doc.getPage(pageItem.pageNum);
 
-  const dpr = Math.min(window.devicePixelRatio || 1, 2); // 軽さ重視で最大2倍まで
-  const targetWidth = (isHalfWidth ? window.innerWidth / 2 : window.innerWidth) * dpr;
-  const targetHeight = window.innerHeight * dpr;
+  slot.style.display = 'flex';
 
-  const unscaledViewport = page.getViewport({ scale: 1 });
-  const scale = Math.min(targetWidth / unscaledViewport.width, targetHeight / unscaledViewport.height);
-  const viewport = page.getViewport({ scale });
+  if (pageItem.type === 'image') {
+    canvas.style.display = 'none';
+    img.style.display = 'block';
+    const url = URL.createObjectURL(pageItem.file);
+    activeObjectUrls.push(url);
+    img.src = url;
+  } else {
+    img.style.display = 'none';
+    canvas.style.display = 'block';
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const doc = await getPdfDoc(pageItem.file);
+    const page = await doc.getPage(pageItem.pageNum);
 
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const targetWidth = (isHalfWidth ? window.innerWidth / 2 : window.innerWidth) * dpr;
+    const targetHeight = window.innerHeight * dpr;
 
-  const renderContext = {
-    canvasContext: ctx,
-    viewport: viewport
-  };
-  await page.render(renderContext).promise;
+    const unscaledViewport = page.getViewport({ scale: 1 });
+    const scale = Math.min(targetWidth / unscaledViewport.width, targetHeight / unscaledViewport.height);
+    const viewport = page.getViewport({ scale });
+
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: ctx, viewport }).promise;
+  }
 }
 
 async function renderCurrentView() {
   if (pagesList.length === 0) return;
-  loadingEl.style.display = 'block';
 
   const item1 = pagesList[currentIndex];
   const item2 = (isSpread && currentIndex + 1 < pagesList.length) ? pagesList[currentIndex + 1] : null;
 
-  // UI更新
+  // PDFが含まれる時だけローディング表示（画像のみなら一瞬で切り替わるため不要）
+  const hasPdf = item1.type === 'pdf' || (item2 && item2.type === 'pdf');
+  if (hasPdf) loadingEl.style.display = 'block';
+
   document.getElementById('file-title').textContent = item1.fileName;
   const pageLabel = item2 ? `${currentIndex + 1}-${currentIndex + 2} / ${pagesList.length}` : `${currentIndex + 1} / ${pagesList.length}`;
   document.getElementById('page-info').textContent = pageLabel;
@@ -415,18 +451,28 @@ async function renderCurrentView() {
 
   container.classList.toggle('spread-mode', isSpread);
 
+  // 前回表示していた画像のメモリを解放
+  clearObjectUrls();
+
   try {
     await Promise.all([
-      renderPageToCanvas(item1, canvas1, ctx1, isSpread),
-      renderPageToCanvas(item2, canvas2, ctx2, isSpread)
+      renderSlot(1, item1, isSpread),
+      renderSlot(2, item2, isSpread)
     ]);
-  } catch (e) {
-    // 連続タップ時のキャンセルエラーは無視
-  }
+  } catch (e) {}
+
   loadingEl.style.display = 'none';
+
+  // 次ページの先読み（画像ファイルの場合、ブラウザキャッシュに乗せてページめくりをゼロ遅延化）
+  const nextIdx = currentIndex + (isSpread ? 2 : 1);
+  if (nextIdx < pagesList.length && pagesList[nextIdx].type === 'image') {
+    const preloadImg = new Image();
+    const preloadUrl = URL.createObjectURL(pagesList[nextIdx].file);
+    preloadImg.onload = () => URL.revokeObjectURL(preloadUrl);
+    preloadImg.src = preloadUrl;
+  }
 }
 
-// ページ送り・戻し
 function goNext() {
   const step = isSpread ? 2 : 1;
   if (currentIndex + step < pagesList.length) {
@@ -446,26 +492,22 @@ function goPrev() {
   }
 }
 
-// タップ操作（右綴じなら左タップで次へ、左綴じなら右タップで次へ）
 document.getElementById('tap-left').onclick = () => isRtl ? goNext() : goPrev();
 document.getElementById('tap-right').onclick = () => isRtl ? goPrev() : goNext();
 document.getElementById('tap-center').onclick = () => viewerScreen.classList.toggle('ui-hidden');
 
-// キーボード操作（PC用）
 window.addEventListener('keydown', e => {
   if (viewerScreen.style.display !== 'block') return;
   if (e.key === 'ArrowLeft') isRtl ? goNext() : goPrev();
   if (e.key === 'ArrowRight') isRtl ? goPrev() : goNext();
 });
 
-// リサイズ時の再描画
 let resizeTimer;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(renderCurrentView, 200);
 });
 
-// UIボタンイベント
 document.getElementById('spread-btn').onclick = (e) => {
   isSpread = !isSpread;
   e.target.textContent = isSpread ? '2ページ見開き' : '1ページ';
@@ -489,6 +531,7 @@ document.getElementById('back-btn').onclick = resetToSetup;
 function resetToSetup() {
   cachedDocs.forEach(doc => doc.destroy());
   cachedDocs.clear();
+  clearObjectUrls();
   pagesList = [];
   viewerScreen.style.display = 'none';
   setupScreen.style.display = 'flex';
