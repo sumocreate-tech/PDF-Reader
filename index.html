@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PDFリーダー">
+<title>ローカルPDFビューア</title>
+<style>
+  :root {
+    --bg: #111;
+    --ui-bg: rgba(25, 25, 25, 0.92);
+    --text: #eee;
+    --accent: #e60012;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+    height: 100dvh;
+    width: 100vw;
+    user-select: none;
+  }
+
+  /* 初期画面・セットアップ */
+  #setup-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: 24px;
+    text-align: center;
+    gap: 20px;
+  }
+  .btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 14px 28px;
+    font-size: 16px;
+    font-weight: bold;
+    border-radius: 8px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(230, 0, 18, 0.4);
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-sub {
+    background: #333;
+    box-shadow: none;
+    font-size: 14px;
+    padding: 10px 20px;
+  }
+  #file-input { display: none; }
+  .note { font-size: 12px; color: #999; max-width: 400px; line-height: 1.5; }
+
+  /* ビューア画面 */
+  #viewer-screen {
+    display: none;
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+  #canvas-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    gap: 2px;
+  }
+  /* 見開き（右綴じ: 右が先、左が次） */
+  #canvas-container.rtl { flex-direction: row-reverse; }
+  #canvas-container.ltr { flex-direction: row; }
+
+  canvas {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    background: #fff;
+    box-shadow: 0 0 15px rgba(0,0,0,0.8);
+  }
+  .spread-mode canvas {
+    max-width: 50%;
+  }
+
+  /* タップ領域 */
+  .tap-zone {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    z-index: 10;
+  }
+  #tap-left { left: 0; width: 32%; }
+  #tap-center { left: 32%; width: 36%; }
+  #tap-right { right: 0; width: 32%; }
+
+  /* UIオーバーレイ（上下バー） */
+  .ui-bar {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    background: var(--ui-bg);
+    backdrop-filter: blur(8px);
+    z-index: 20;
+    padding: 12px 16px;
+    transition: opacity 0.2s, transform 0.2s;
+  }
+  #top-bar {
+    top: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: max(12px, env(safe-area-inset-top));
+  }
+  #bottom-bar {
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+  .ui-hidden #top-bar { opacity: 0; transform: translateY(-100%); pointer-events: none; }
+  .ui-hidden #bottom-bar { opacity: 0; transform: translateY(100%); pointer-events: none; }
+
+  .controls-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+  .toggle-btn {
+    background: #333;
+    color: #fff;
+    border: 1px solid #555;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .toggle-btn.active { background: var(--accent); border-color: var(--accent); }
+  #file-title {
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 55%;
+  }
+  #page-slider {
+    width: 100%;
+    accent-color: var(--accent);
+    /* 右綴じ用にスライダーを反転させる */
+  }
+  #page-slider.rtl { direction: rtl; }
+  #loading {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.8);
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 14px;
+    z-index: 30;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+  <!-- セットアップ画面 -->
+  <div id="setup-screen">
+    <h2>PDFマンガ・本リーダー</h2>
+    <p class="note" id="engine-status">PDFエンジン確認中...</p>
+    <button class="btn" id="select-folder-btn">フォルダを選択して開く</button>
+    <button class="btn btn-sub" id="select-files-btn">複数ファイルを選択</button>
+    <input type="file" id="folder-input" webkitdirectory directory multiple>
+    <input type="file" id="files-input" accept="application/pdf" multiple>
+    <p class="note">
+      ※オフラインでホーム画面から使う場合は、最初に1度ネット接続状態で開いてエンジンをキャッシュさせてください。<br>
+      ※iOS等でフォルダ選択が出ない場合は「複数ファイルを選択」から全選択してください。
+    </p>
+  </div>
+
+  <!-- ビューア画面 -->
+  <div id="viewer-screen" class="ui-hidden">
+    <div id="top-bar" class="ui-bar">
+      <button class="toggle-btn" id="back-btn">← 戻る</button>
+      <div id="file-title">タイトル</div>
+      <div style="display:flex; gap:6px;">
+        <button class="toggle-btn" id="spread-btn">1ページ</button>
+        <button class="toggle-btn" id="dir-btn">右綴じ</button>
+      </div>
+    </div>
+
+    <div id="canvas-container" class="rtl">
+      <canvas id="canvas-1"></canvas>
+      <canvas id="canvas-2" style="display:none;"></canvas>
+    </div>
+
+    <div id="tap-left" class="tap-zone"></div>
+    <div id="tap-center" class="tap-zone"></div>
+    <div id="tap-right" class="tap-zone"></div>
+
+    <div id="bottom-bar" class="ui-bar">
+      <div class="controls-row">
+        <span id="page-info" style="font-size:13px;">1 / 1</span>
+        <span style="font-size:11px; color:#aaa;">左タップ:次へ / 中央:メニュー / 右タップ:戻る</span>
+      </div>
+      <input type="range" id="page-slider" class="rtl" min="0" max="0" value="0">
+    </div>
+
+    <div id="loading">読込中...</div>
+  </div>
+
+<script>
+/**
+ * 1. オフライン対応 (Service Worker & Manifest の動的生成)
+ * 単一HTMLファイルのままPWA化し、PDF.js本体をCache APIに保存してオフライン動作させる
+ */
+const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+const PDFJS_WORKER_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// Web App Manifest 動的付与（ホーム画面追加時のフルスクリーン化）
+const manifest = {
+  name: "PDFリーダー",
+  short_name: "PDFリーダー",
+  display: "standalone",
+  background_color: "#111111",
+  theme_color: "#111111",
+  start_url: location.href
+};
+const manifestBlob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
+const manifestLink = document.createElement('link');
+manifestLink.rel = 'manifest';
+manifestLink.href = URL.createObjectURL(manifestBlob);
+document.head.appendChild(manifestLink);
+
+// Service Worker 登録（HTTPS または localhost 環境で有効）
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  const swCode = `
+    const CACHE_NAME = 'pdf-reader-v1';
+    const ASSETS = [self.location.href, '${PDFJS_CDN}', '${PDFJS_WORKER_CDN}'];
+    self.addEventListener('install', e => {
+      e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+    });
+    self.addEventListener('activate', e => {
+      e.waitUntil(self.clients.claim());
+    });
+    self.addEventListener('fetch', e => {
+      e.respondWith(
+        caches.match(e.request).then(res => res || fetch(e.request).then(fetchRes => {
+          return caches.open(CACHE_NAME).then(cache => {
+            if(e.request.method === 'GET') cache.put(e.request, fetchRes.clone());
+            return fetchRes;
+          });
+        }))
+      );
+    });
+  `;
+  const swBlob = new Blob([swCode], {type: 'application/javascript'});
+  navigator.serviceWorker.register(URL.createObjectURL(swBlob)).catch(() => {});
+}
+
+// PDF.js の動的ロード
+function loadPdfJs() {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = PDFJS_CDN;
+    script.onload = () => {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_CDN;
+      document.getElementById('engine-status').textContent = '準備完了（オフラインキャッシュ対応）';
+      resolve();
+    };
+    script.onerror = () => {
+      document.getElementById('engine-status').textContent = '※初回のみネット接続が必要です';
+      reject();
+    };
+    document.head.appendChild(script);
+  });
+}
+loadPdfJs();
+
+/**
+ * 2. PDFリーダーのコアロジック（軽量・メモリ節約設計）
+ */
+let pagesList = []; // { file: File, fileName: string, pageNum: number, pdfDoc: PDFDocumentProxy }
+let currentIndex = 0;
+let isSpread = false; // false: 1ページ表示, true: 2ページ見開き
+let isRtl = true;     // true: 右綴じ(マンガ標準), false: 左綴じ
+let renderTask1 = null;
+let renderTask2 = null;
+let cachedDocs = new Map(); // メモリ圧迫を防ぐため直近数ファイルのみ保持
+
+const setupScreen = document.getElementById('setup-screen');
+const viewerScreen = document.getElementById('viewer-screen');
+const container = document.getElementById('canvas-container');
+const canvas1 = document.getElementById('canvas-1');
+const canvas2 = document.getElementById('canvas-2');
+const ctx1 = canvas1.getContext('2d', { alpha: false });
+const ctx2 = canvas2.getContext('2d', { alpha: false });
+const loadingEl = document.getElementById('loading');
+const slider = document.getElementById('page-slider');
+
+// ファイル選択イベント
+document.getElementById('select-folder-btn').onclick = () => document.getElementById('folder-input').click();
+document.getElementById('select-files-btn').onclick = () => document.getElementById('files-input').click();
+document.getElementById('folder-input').onchange = handleFiles;
+document.getElementById('files-input').onchange = handleFiles;
+
+async function handleFiles(e) {
+  const rawFiles = Array.from(e.target.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+  if (rawFiles.length === 0) {
+    alert('PDFファイルが見つかりませんでした。');
+    return;
+  }
+
+  // 自然順ソート (1.pdf, 2.pdf, 10.pdf の順に並ぶようにする)
+  rawFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+
+  setupScreen.style.display = 'none';
+  viewerScreen.style.display = 'block';
+  loadingEl.style.display = 'block';
+  loadingEl.textContent = `PDF解析中 (0 / ${rawFiles.length})...`;
+
+  pagesList = [];
+  cachedDocs.clear();
+
+  // 全PDFの総ページ数を軽量スキャンしてフラットなページ配列を作成
+  for (let i = 0; i < rawFiles.length; i++) {
+    const file = rawFiles[i];
+    loadingEl.textContent = `PDF解析中 (${i + 1} / ${rawFiles.length})...`;
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const doc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      for (let p = 1; p <= doc.numPages; p++) {
+        pagesList.push({ file, fileName: file.name, pageNum: p });
+      }
+      doc.destroy(); // メモリ解放
+    } catch (err) {
+      console.error('読込失敗:', file.name, err);
+    }
+  }
+
+  loadingEl.style.display = 'none';
+  if (pagesList.length === 0) {
+    alert('読み込めるPDFがありませんでした。');
+    resetToSetup();
+    return;
+  }
+
+  currentIndex = 0;
+  slider.max = pagesList.length - 1;
+  renderCurrentView();
+}
+
+// 必要なPDFドキュメントだけをオンデマンド取得（最大3ファイルまでキャッシュ）
+async function getPdfDoc(file) {
+  if (cachedDocs.has(file.name)) {
+    return cachedDocs.get(file.name);
+  }
+  if (cachedDocs.size >= 3) {
+    const oldestKey = cachedDocs.keys().next().value;
+    cachedDocs.get(oldestKey).destroy();
+    cachedDocs.delete(oldestKey);
+  }
+  const buf = await file.arrayBuffer();
+  const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+  cachedDocs.set(file.name, doc);
+  return doc;
+}
+
+// 画面サイズに合わせて最適な解像度でCanvasに描画
+async function renderPageToCanvas(pageItem, canvas, ctx, isHalfWidth) {
+  if (!pageItem) {
+    canvas.style.display = 'none';
+    return;
+  }
+  canvas.style.display = 'block';
+  const doc = await getPdfDoc(pageItem.file);
+  const page = await doc.getPage(pageItem.pageNum);
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2); // 軽さ重視で最大2倍まで
+  const targetWidth = (isHalfWidth ? window.innerWidth / 2 : window.innerWidth) * dpr;
+  const targetHeight = window.innerHeight * dpr;
+
+  const unscaledViewport = page.getViewport({ scale: 1 });
+  const scale = Math.min(targetWidth / unscaledViewport.width, targetHeight / unscaledViewport.height);
+  const viewport = page.getViewport({ scale });
+
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+
+  const renderContext = {
+    canvasContext: ctx,
+    viewport: viewport
+  };
+  await page.render(renderContext).promise;
+}
+
+async function renderCurrentView() {
+  if (pagesList.length === 0) return;
+  loadingEl.style.display = 'block';
+
+  const item1 = pagesList[currentIndex];
+  const item2 = (isSpread && currentIndex + 1 < pagesList.length) ? pagesList[currentIndex + 1] : null;
+
+  // UI更新
+  document.getElementById('file-title').textContent = item1.fileName;
+  const pageLabel = item2 ? `${currentIndex + 1}-${currentIndex + 2} / ${pagesList.length}` : `${currentIndex + 1} / ${pagesList.length}`;
+  document.getElementById('page-info').textContent = pageLabel;
+  slider.value = currentIndex;
+
+  container.classList.toggle('spread-mode', isSpread);
+
+  try {
+    await Promise.all([
+      renderPageToCanvas(item1, canvas1, ctx1, isSpread),
+      renderPageToCanvas(item2, canvas2, ctx2, isSpread)
+    ]);
+  } catch (e) {
+    // 連続タップ時のキャンセルエラーは無視
+  }
+  loadingEl.style.display = 'none';
+}
+
+// ページ送り・戻し
+function goNext() {
+  const step = isSpread ? 2 : 1;
+  if (currentIndex + step < pagesList.length) {
+    currentIndex += step;
+    renderCurrentView();
+  }
+}
+
+function goPrev() {
+  const step = isSpread ? 2 : 1;
+  if (currentIndex - step >= 0) {
+    currentIndex -= step;
+    renderCurrentView();
+  } else if (currentIndex > 0) {
+    currentIndex = 0;
+    renderCurrentView();
+  }
+}
+
+// タップ操作（右綴じなら左タップで次へ、左綴じなら右タップで次へ）
+document.getElementById('tap-left').onclick = () => isRtl ? goNext() : goPrev();
+document.getElementById('tap-right').onclick = () => isRtl ? goPrev() : goNext();
+document.getElementById('tap-center').onclick = () => viewerScreen.classList.toggle('ui-hidden');
+
+// キーボード操作（PC用）
+window.addEventListener('keydown', e => {
+  if (viewerScreen.style.display !== 'block') return;
+  if (e.key === 'ArrowLeft') isRtl ? goNext() : goPrev();
+  if (e.key === 'ArrowRight') isRtl ? goPrev() : goNext();
+});
+
+// リサイズ時の再描画
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(renderCurrentView, 200);
+});
+
+// UIボタンイベント
+document.getElementById('spread-btn').onclick = (e) => {
+  isSpread = !isSpread;
+  e.target.textContent = isSpread ? '2ページ見開き' : '1ページ';
+  e.target.classList.toggle('active', isSpread);
+  renderCurrentView();
+};
+
+document.getElementById('dir-btn').onclick = (e) => {
+  isRtl = !isRtl;
+  e.target.textContent = isRtl ? '右綴じ' : '左綴じ';
+  container.className = (isRtl ? 'rtl' : 'ltr') + (isSpread ? ' spread-mode' : '');
+  slider.className = isRtl ? 'rtl' : '';
+};
+
+slider.oninput = (e) => {
+  currentIndex = parseInt(e.target.value, 10);
+  renderCurrentView();
+};
+
+document.getElementById('back-btn').onclick = resetToSetup;
+function resetToSetup() {
+  cachedDocs.forEach(doc => doc.destroy());
+  cachedDocs.clear();
+  pagesList = [];
+  viewerScreen.style.display = 'none';
+  setupScreen.style.display = 'flex';
+}
+</script>
+</body>
+</html>
