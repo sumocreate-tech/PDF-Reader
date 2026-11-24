@@ -2,206 +2,355 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="マンガリーダー">
-<title>ローカル本・画像リーダー</title>
+<meta name="apple-mobile-web-app-title" content="リーダー">
+<meta name="theme-color" content="#0e0f12">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="icon" type="image/png" href="icon.png">
+<title>マンガ・画像・PDFリーダー</title>
 <style>
   :root {
-    --bg: #111;
-    --ui-bg: rgba(25, 25, 25, 0.92);
-    --text: #eee;
+    --bg: #0e0f12;
+    --panel: #181a20;
+    --panel2: #23262e;
+    --line: rgba(255, 255, 255, 0.09);
+    --text: #f3f4f6;
+    --muted: #9aa1ad;
     --accent: #e60012;
+    --accent-soft: rgba(230, 0, 18, 0.16);
+    --bar: rgba(20, 21, 26, 0.88);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
   body {
     background: var(--bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Segoe UI", sans-serif;
     height: 100dvh;
     width: 100vw;
+    overflow: hidden;
+    overscroll-behavior: none;
     user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    touch-action: manipulation;
+    -webkit-font-smoothing: antialiased;
   }
+  button { font-family: inherit; color: inherit; }
+  svg { display: block; flex: none; }
 
-  /* 初期画面・セットアップ */
+  /* ========== 初期画面 ========== */
   #setup-screen {
+    position: absolute; inset: 0;
+    display: flex;
+    overflow-y: auto;
+    padding:
+      max(20px, env(safe-area-inset-top))
+      max(20px, env(safe-area-inset-right))
+      max(20px, env(safe-area-inset-bottom))
+      max(20px, env(safe-area-inset-left));
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(230, 0, 18, 0.18), transparent 70%),
+      var(--bg);
+  }
+  .setup-card {
+    margin: auto;
+    width: 100%;
+    max-width: 440px;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    padding: 24px;
+    gap: 14px;
     text-align: center;
-    gap: 20px;
   }
-  .btn {
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    padding: 14px 28px;
-    font-size: 16px;
-    font-weight: bold;
-    border-radius: 8px;
-    cursor: pointer;
-    box-shadow: 0 4px 12px rgba(230, 0, 18, 0.4);
+  .app-icon {
+    width: 92px; height: 92px;
+    border-radius: 21px;
+    margin: 0 auto 4px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--line);
+    background: var(--panel);
   }
-  .btn:active { transform: scale(0.97); }
-  .btn-sub {
-    background: #333;
-    box-shadow: none;
-    font-size: 14px;
-    padding: 10px 20px;
+  h1 { font-size: 22px; font-weight: 700; letter-spacing: 0.02em; }
+  .sub { font-size: 13px; color: var(--muted); margin-top: -8px; }
+  .chip {
+    align-self: center;
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--muted);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 6px 14px;
   }
-  input[type="file"] { display: none; }
-  .note { font-size: 12px; color: #999; max-width: 400px; line-height: 1.5; }
+  .chip::before {
+    content: ""; width: 8px; height: 8px; border-radius: 50%;
+    background: #f5a623;
+  }
+  .chip.ok::before { background: #2ecc71; }
+  .chip.ng::before { background: #e74c3c; }
 
-  /* ビューア画面 */
-  #viewer-screen {
-    display: none;
-    position: relative;
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
     width: 100%;
-    height: 100%;
+    min-height: 56px;
+    border: 1px solid transparent;
+    border-radius: 14px;
+    font-size: 16px; font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.08s, background 0.15s;
   }
+  .btn:active { transform: scale(0.98); }
+  .btn-primary { background: var(--accent); color: #fff; box-shadow: 0 8px 22px rgba(230, 0, 18, 0.35); }
+  .btn-secondary { background: var(--panel2); border-color: var(--line); color: var(--text); }
+
+  .drop {
+    border: 1.5px dashed rgba(255, 255, 255, 0.2);
+    border-radius: 14px;
+    padding: 18px 14px;
+    font-size: 13px; line-height: 1.6;
+    color: var(--muted);
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+  .drop.over { border-color: var(--accent); background: var(--accent-soft); color: #fff; }
+
+  details.help {
+    text-align: left;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  details.help summary {
+    list-style: none; cursor: pointer;
+    padding: 14px 16px; font-weight: 600; color: var(--text);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  details.help summary::-webkit-details-marker { display: none; }
+  details.help summary::after { content: "＋"; color: var(--muted); }
+  details.help[open] summary::after { content: "－"; }
+  details.help ul { padding: 0 16px 14px 34px; display: grid; gap: 8px; line-height: 1.6; }
+  input[type="file"] { display: none; }
+
+  /* ========== ビューア ========== */
+  #viewer-screen { display: none; position: absolute; inset: 0; background: #000; }
+  #viewer-screen.active { display: block; }
+
   #media-container {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 100%;
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
     gap: 2px;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
-  /* 見開き（右綴じ: 右が先、左が次） */
   #media-container.rtl { flex-direction: row-reverse; }
   #media-container.ltr { flex-direction: row; }
-
   .page-slot {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    max-width: 100%;
+    display: flex; align-items: center; justify-content: center;
+    height: 100%; max-width: 100%; min-width: 0;
   }
-  .spread-mode .page-slot {
-    max-width: 50%;
-  }
-
+  .spread-mode .page-slot { max-width: 50%; }
   canvas, img.page-img {
-    max-width: 100%;
-    max-height: 100%;
+    max-width: 100%; max-height: 100%;
     object-fit: contain;
-    box-shadow: 0 0 15px rgba(0,0,0,0.8);
+    -webkit-user-drag: none;
   }
   canvas { background: #fff; }
 
   /* タップ領域 */
-  .tap-zone {
-    position: absolute;
-    top: 0;
-    height: 100%;
-    z-index: 10;
-  }
+  .tap-zone { position: absolute; top: 0; height: 100%; z-index: 10; }
   #tap-left { left: 0; width: 32%; }
   #tap-center { left: 32%; width: 36%; }
   #tap-right { right: 0; width: 32%; }
 
-  /* UIオーバーレイ（上下バー） */
+  /* 上下バー */
   .ui-bar {
-    position: absolute;
-    left: 0;
-    width: 100%;
-    background: var(--ui-bg);
-    backdrop-filter: blur(8px);
+    position: absolute; left: 0; width: 100%;
     z-index: 20;
-    padding: 12px 16px;
+    background: var(--bar);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    backdrop-filter: blur(16px) saturate(1.4);
     transition: opacity 0.2s, transform 0.2s;
   }
   #top-bar {
     top: 0;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-top: max(12px, env(safe-area-inset-top));
+    display: flex; align-items: center; gap: 10px;
+    padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left));
+    border-bottom: 1px solid var(--line);
   }
   #bottom-bar {
     bottom: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px max(16px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    border-top: 1px solid var(--line);
   }
   .ui-hidden #top-bar { opacity: 0; transform: translateY(-100%); pointer-events: none; }
   .ui-hidden #bottom-bar { opacity: 0; transform: translateY(100%); pointer-events: none; }
 
-  .controls-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
-  }
-  .toggle-btn {
-    background: #333;
-    color: #fff;
-    border: 1px solid #555;
-    padding: 6px 12px;
-    border-radius: 6px;
-    font-size: 13px;
+  .icon-btn {
+    width: 40px; height: 40px;
+    display: grid; place-items: center;
+    background: var(--panel2);
+    border: 1px solid var(--line);
+    border-radius: 12px;
     cursor: pointer;
+    flex: none;
   }
-  .toggle-btn.active { background: var(--accent); border-color: var(--accent); }
+  .icon-btn:active { transform: scale(0.94); }
+  .title-block { flex: 1; min-width: 0; }
   #file-title {
-    font-size: 13px;
+    font-size: 14px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #file-sub {
+    font-size: 11px; color: var(--muted); margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .toggles { display: flex; gap: 6px; flex: none; }
+  .pill {
+    background: var(--panel2);
+    border: 1px solid var(--line);
+    padding: 9px 12px;
+    border-radius: 10px;
+    font-size: 13px; font-weight: 600;
+    cursor: pointer;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 50%;
   }
-  #page-slider {
-    width: 100%;
-    accent-color: var(--accent);
+  .pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .pill:active { transform: scale(0.96); }
+
+  #page-info {
+    font-size: 13px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    min-width: 76px; text-align: center;
+    color: var(--text);
   }
+  #page-slider { flex: 1; min-width: 0; accent-color: var(--accent); height: 28px; }
   #page-slider.rtl { direction: rtl; }
-  #loading {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    background: rgba(0,0,0,0.8);
-    padding: 12px 20px;
-    border-radius: 8px;
-    font-size: 14px;
-    z-index: 30;
+
+  /* UI非表示時の細い進捗線 */
+  #edge-progress {
+    position: absolute; left: 0; bottom: 0;
+    width: 100%; height: 3px;
+    background: var(--accent);
+    transform-origin: right center;
+    transform: scaleX(0);
+    transition: transform 0.2s;
+    z-index: 15;
+    pointer-events: none;
+    opacity: 0.9;
+  }
+
+  /* 最初だけ出す操作ヒント */
+  #hint {
+    position: absolute; inset: 0; z-index: 25;
     display: none;
+    pointer-events: none;
+    background: rgba(0, 0, 0, 0.55);
+  }
+  #hint.show { display: flex; animation: fadeout 0.4s ease 2.6s forwards; }
+  .hint-col {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    font-size: 16px; font-weight: 700;
+    color: #fff;
+  }
+  .hint-col small { font-weight: 400; font-size: 12px; color: #ccc; }
+  .hint-col + .hint-col { border-left: 1px dashed rgba(255, 255, 255, 0.35); }
+  @keyframes fadeout { to { opacity: 0; } }
+
+  /* 読込中・通知 */
+  #loading {
+    position: fixed; inset: 0; z-index: 50;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+    -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  }
+  #loading.show { display: flex; }
+  .loading-box {
+    min-width: 220px; max-width: 80vw;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 20px 24px;
+    text-align: center;
+    font-size: 14px;
+  }
+  .spinner {
+    width: 28px; height: 28px; margin: 0 auto 12px;
+    border: 3px solid rgba(255, 255, 255, 0.15);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .bar { height: 4px; background: rgba(255, 255, 255, 0.12); border-radius: 2px; margin-top: 12px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.15s; }
+
+  #toast {
+    position: fixed; left: 50%; z-index: 60;
+    bottom: calc(env(safe-area-inset-bottom) + 24px);
+    transform: translate(-50%, 20px);
+    display: flex; align-items: center; gap: 12px;
+    max-width: calc(100vw - 32px);
+    background: #2a2d36;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px 16px;
+    font-size: 13px;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+  #toast button {
+    background: var(--accent); border: 0; border-radius: 8px;
+    padding: 6px 12px; font-size: 12px; font-weight: 700; color: #fff; cursor: pointer;
+    white-space: nowrap;
   }
 </style>
 </head>
 <body>
 
-  <!-- セットアップ画面 -->
-  <div id="setup-screen">
-    <h2>マンガ・画像・PDFリーダー</h2>
-    <p class="note" id="engine-status">準備中...</p>
-    <button class="btn" id="select-folder-btn">フォルダを選択して開く</button>
-    <button class="btn btn-sub" id="select-files-btn">複数ファイルを選択</button>
-    <input type="file" id="folder-input" webkitdirectory directory multiple>
-    <input type="file" id="files-input" accept="image/*,.webp,.avif,.pdf,application/pdf" multiple>
-    <p class="note">
-      対応形式: WebP / JPG / PNG / GIF / AVIF / BMP / SVG / PDF<br>
-      ※画像のみならオフラインでも即動作します。PDFも使う場合は初回のみネット接続状態で開いてキャッシュさせてください。
-    </p>
-  </div>
+  <!-- 初期画面 -->
+  <main id="setup-screen">
+    <div class="setup-card">
+      <img class="app-icon" src="icon.png" alt="" onerror="this.style.visibility='hidden'">
+      <h1>マンガ・画像・PDFリーダー</h1>
+      <p class="sub">端末の中だけで読む。通信なし・オフライン対応</p>
+      <div class="chip" id="engine-status">準備中…</div>
 
-  <!-- ビューア画面 -->
-  <div id="viewer-screen" class="ui-hidden">
-    <div id="top-bar" class="ui-bar">
-      <button class="toggle-btn" id="back-btn">← 戻る</button>
-      <div id="file-title">タイトル</div>
-      <div style="display:flex; gap:6px;">
-        <button class="toggle-btn" id="spread-btn">1ページ</button>
-        <button class="toggle-btn" id="dir-btn">右綴じ</button>
+      <button class="btn btn-primary" id="select-folder-btn">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        フォルダを選んで開く
+      </button>
+      <button class="btn btn-secondary" id="select-files-btn">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+        ファイルを選ぶ（複数OK）
+      </button>
+
+      <div class="drop" id="drop-zone">
+        ここにフォルダやファイルを<br>ドラッグ＆ドロップでも開けます
       </div>
-    </div>
 
+      <details class="help">
+        <summary>使い方・メモ</summary>
+        <ul>
+          <li>対応形式: WebP / JPG / PNG / GIF / AVIF / BMP / SVG / PDF</li>
+          <li>フォルダを選ぶと、サブフォルダも含めて 1, 2, 10 の自然順で並べて開きます。</li>
+          <li>端末によってフォルダ選択が効かない場合は、「ファイルを選ぶ」でフォルダ内を全選択するか、ドラッグ＆ドロップを使ってください。</li>
+          <li>操作: 左右タップでページ送り、中央タップでメニュー、左右スワイプも使えます。</li>
+          <li>オフライン: 初回だけネットに繋いで開けば、以降は機内モードでも起動できます。ファイルはどこにも送信されません。</li>
+        </ul>
+      </details>
+    </div>
+  </main>
+
+  <input type="file" id="folder-input" webkitdirectory directory multiple>
+  <input type="file" id="files-input" accept="image/*,.webp,.avif,.pdf,application/pdf" multiple>
+
+  <!-- ビューア -->
+  <section id="viewer-screen" class="ui-hidden">
     <div id="media-container" class="rtl">
       <div class="page-slot" id="slot-1">
         <canvas id="canvas-1" style="display:none;"></canvas>
@@ -217,325 +366,533 @@
     <div id="tap-center" class="tap-zone"></div>
     <div id="tap-right" class="tap-zone"></div>
 
-    <div id="bottom-bar" class="ui-bar">
-      <div class="controls-row">
-        <span id="page-info" style="font-size:13px;">1 / 1</span>
-        <span style="font-size:11px; color:#aaa;">左タップ:次へ / 中央:メニュー / 右タップ:戻る</span>
+    <div id="edge-progress"></div>
+
+    <div id="top-bar" class="ui-bar">
+      <button class="icon-btn" id="back-btn" aria-label="戻る">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <div class="title-block">
+        <div id="file-title">タイトル</div>
+        <div id="file-sub"></div>
       </div>
-      <input type="range" id="page-slider" class="rtl" min="0" max="0" value="0">
+      <div class="toggles">
+        <button class="pill" id="spread-btn" aria-pressed="false">見開き</button>
+        <button class="pill" id="dir-btn">右綴じ</button>
+      </div>
     </div>
 
-    <div id="loading">読込中...</div>
+    <div id="bottom-bar" class="ui-bar">
+      <span id="page-info">1 / 1</span>
+      <input type="range" id="page-slider" class="rtl" min="0" max="0" value="0" aria-label="ページ">
+    </div>
+
+    <div id="hint">
+      <div class="hint-col" id="hint-left" style="flex:32"></div>
+      <div class="hint-col" style="flex:36">メニュー<small>タップで表示/非表示</small></div>
+      <div class="hint-col" id="hint-right" style="flex:32"></div>
+    </div>
+  </section>
+
+  <div id="loading">
+    <div class="loading-box">
+      <div class="spinner"></div>
+      <div id="loading-text">読み込み中…</div>
+      <div class="bar"><i id="loading-bar"></i></div>
+    </div>
   </div>
 
+  <div id="toast"><span id="toast-msg"></span><button id="toast-action" style="display:none;"></button></div>
+
 <script>
-/**
- * 1. オフライン対応 (Service Worker & Manifest の動的生成)
- */
-const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-const PDFJS_WORKER_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const $ = (id) => document.getElementById(id);
 
-const manifest = {
-  name: "マンガ・画像リーダー",
-  short_name: "リーダー",
-  display: "standalone",
-  background_color: "#111111",
-  theme_color: "#111111",
-  start_url: location.href
-};
-const manifestBlob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
-const manifestLink = document.createElement('link');
-manifestLink.rel = 'manifest';
-manifestLink.href = URL.createObjectURL(manifestBlob);
-document.head.appendChild(manifestLink);
-
-if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-  const swCode = `
-    const CACHE_NAME = 'media-reader-v2';
-    const ASSETS = [self.location.href, '${PDFJS_CDN}', '${PDFJS_WORKER_CDN}'];
-    self.addEventListener('install', e => {
-      e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
-    });
-    self.addEventListener('activate', e => {
-      e.waitUntil(self.clients.claim());
-    });
-    self.addEventListener('fetch', e => {
-      e.respondWith(
-        caches.match(e.request).then(res => res || fetch(e.request).then(fetchRes => {
-          return caches.open(CACHE_NAME).then(cache => {
-            if(e.request.method === 'GET') cache.put(e.request, fetchRes.clone());
-            return fetchRes;
-          });
-        }))
-      );
-    });
-  `;
-  const swBlob = new Blob([swCode], {type: 'application/javascript'});
-  navigator.serviceWorker.register(URL.createObjectURL(swBlob)).catch(() => {});
+/* =========================================================
+ * 0. 設定の保存（見開き・綴じ方向を次回も覚える）
+ * ======================================================= */
+const SETTINGS_KEY = 'reader-settings-v1';
+function loadSettings() {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'); } catch (e) { return {}; }
+}
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ isSpread, isRtl })); } catch (e) {}
 }
 
-let pdfJsReady = false;
-function loadPdfJs() {
-  return new Promise((resolve) => {
-    const script = document.createElement('script');
-    script.src = PDFJS_CDN;
-    script.onload = () => {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_CDN;
-      pdfJsReady = true;
-      document.getElementById('engine-status').textContent = '準備完了（画像・PDF両対応 / オフラインキャッシュ済）';
-      resolve();
-    };
-    script.onerror = () => {
-      document.getElementById('engine-status').textContent = '準備完了（画像モード ※PDF読込には初回ネット接続が必要）';
-      resolve();
-    };
-    document.head.appendChild(script);
+/* =========================================================
+ * 1. 通知・読み込み表示
+ * ======================================================= */
+let toastTimer;
+function hideToast() { $('toast').classList.remove('show'); }
+function showToast(msg, actionLabel, action, ms = 3500) {
+  $('toast-msg').textContent = msg;
+  const b = $('toast-action');
+  if (actionLabel) {
+    b.style.display = '';
+    b.textContent = actionLabel;
+    b.onclick = () => { hideToast(); if (action) action(); };
+  } else {
+    b.style.display = 'none';
+  }
+  $('toast').classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, ms);
+}
+function showLoading(text, ratio) {
+  $('loading').classList.add('show');
+  $('loading-text').textContent = text;
+  $('loading-bar').style.width = Math.round((ratio || 0) * 100) + '%';
+}
+function hideLoading() { $('loading').classList.remove('show'); }
+
+/* =========================================================
+ * 2. オフライン対応（Service Worker）
+ *    ※ sw.js と manifest.json は index.html と同じ場所に置く
+ * ======================================================= */
+if ('serviceWorker' in navigator) {
+  let hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController) showToast('新しいバージョンに更新されました', '再読み込み', () => location.reload(), 8000);
+    hadController = true;
   });
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+
+/* =========================================================
+ * 3. PDF.js の読み込み（同じフォルダの pdf.min.js を優先、だめならCDN）
+ * ======================================================= */
+const PDFJS_LOCAL = 'pdf.min.js';
+const PDFJS_WORKER_LOCAL = 'pdf.worker.min.js';
+const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+const PDFJS_WORKER_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+let pdfJsReady = false;
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => { s.remove(); reject(new Error('load failed: ' + src)); };
+    document.head.appendChild(s);
+  });
+}
+function setStatus(text, cls) {
+  const el = $('engine-status');
+  el.textContent = text;
+  el.className = 'chip ' + (cls || '');
+}
+async function loadPdfJs() {
+  const attempts = [
+    [PDFJS_LOCAL, new URL(PDFJS_WORKER_LOCAL, location.href).href],
+    [PDFJS_CDN, PDFJS_WORKER_CDN],
+  ];
+  for (const [src, worker] of attempts) {
+    try {
+      await loadScript(src);
+      pdfjsLib.GlobalWorkerOptions.workerSrc = worker;
+      pdfJsReady = true;
+      setStatus('画像・PDF どちらも読めます', 'ok');
+      return;
+    } catch (e) {}
+  }
+  setStatus('画像のみ対応（PDFを使うには pdf.min.js が必要）', 'ng');
 }
 loadPdfJs();
 
-/**
- * 2. 画像 + PDF 統合リーダーロジック
- */
+/* =========================================================
+ * 4. 状態
+ * ======================================================= */
 const IMAGE_EXTS = /\.(webp|jpe?g|png|gif|avif|bmp|svg|ico)$/i;
 const PDF_EXT = /\.pdf$/i;
+const collator = new Intl.Collator('ja', { numeric: true, sensitivity: 'base' });
 
-let pagesList = []; // { type: 'image' | 'pdf', file: File, fileName: string, pageNum?: number }
+const saved = loadSettings();
+let isSpread = !!saved.isSpread;
+let isRtl = saved.isRtl !== false; // 既定は右綴じ
+
+let pagesList = []; // { type:'image'|'pdf', file, name, dir, pageNum? }
 let currentIndex = 0;
-let isSpread = false;
-let isRtl = true;
-let cachedDocs = new Map();
-let activeObjectUrls = []; // メモリリーク防止用のURL管理
+let renderToken = 0;
+const cachedDocs = new Map(); // File -> pdf document
+const slotUrls = { 1: null, 2: null };
 
-const setupScreen = document.getElementById('setup-screen');
-const viewerScreen = document.getElementById('viewer-screen');
-const container = document.getElementById('media-container');
-const loadingEl = document.getElementById('loading');
-const slider = document.getElementById('page-slider');
+const setupScreen = $('setup-screen');
+const viewerScreen = $('viewer-screen');
+const container = $('media-container');
+const slider = $('page-slider');
 
-document.getElementById('select-folder-btn').onclick = () => document.getElementById('folder-input').click();
-document.getElementById('select-files-btn').onclick = () => document.getElementById('files-input').click();
-document.getElementById('folder-input').onchange = handleFiles;
-document.getElementById('files-input').onchange = handleFiles;
+/* =========================================================
+ * 5. ファイルの受け取り（ファイル選択 / フォルダ選択 / ドラッグ＆ドロップ）
+ * ======================================================= */
+$('select-folder-btn').onclick = () => $('folder-input').click();
+$('select-files-btn').onclick = () => $('files-input').click();
+$('folder-input').onchange = handleInput;
+$('files-input').onchange = handleInput;
 
-function isSupportedFile(file) {
-  // 隠しファイル（Macの .DS_Store や ._ で始まるリソースフォーク）を除外
-  if (file.name.startsWith('.')) return false;
-  return IMAGE_EXTS.test(file.name) || PDF_EXT.test(file.name) || file.type.startsWith('image/') || file.type === 'application/pdf';
+async function handleInput(e) {
+  const files = Array.from(e.target.files || []);
+  e.target.value = ''; // 同じフォルダをもう一度選べるようにリセット
+  await openEntries(files.map((f) => ({ file: f, path: f.webkitRelativePath || f.name })));
 }
 
-async function handleFiles(e) {
-  const rawFiles = Array.from(e.target.files).filter(isSupportedFile);
-  if (rawFiles.length === 0) {
-    alert('対応する画像またはPDFファイルが見つかりませんでした。');
+function isSupported(item) {
+  const segments = item.path.split('/');
+  // 隠しファイル・macOSの __MACOSX を除外
+  if (segments.some((s) => s.startsWith('.') || s === '__MACOSX')) return false;
+  const f = item.file;
+  return IMAGE_EXTS.test(f.name) || PDF_EXT.test(f.name) || (f.type && f.type.startsWith('image/')) || f.type === 'application/pdf';
+}
+
+// ドラッグ＆ドロップ（フォルダは中身を再帰的にたどる）
+function readAllEntries(reader) {
+  return new Promise((resolve, reject) => {
+    const all = [];
+    const readBatch = () => reader.readEntries((batch) => {
+      if (!batch.length) resolve(all);
+      else { all.push(...batch); readBatch(); }
+    }, reject);
+    readBatch();
+  });
+}
+async function walkEntry(entry, base, out) {
+  if (entry.name.startsWith('.')) return;
+  if (entry.isFile) {
+    const file = await new Promise((res, rej) => entry.file(res, rej));
+    out.push({ file, path: base + entry.name });
+  } else if (entry.isDirectory) {
+    const children = await readAllEntries(entry.createReader());
+    for (const c of children) await walkEntry(c, base + entry.name + '/', out);
+  }
+}
+async function collectFromDataTransfer(dt) {
+  const out = [];
+  // dropイベント中でないと取れないので、最初に同期で全部取り出す
+  const entries = Array.from(dt.items || [])
+    .map((it) => (it.webkitGetAsEntry ? it.webkitGetAsEntry() : null))
+    .filter(Boolean);
+  const plainFiles = Array.from(dt.files || []);
+  if (entries.length) {
+    for (const en of entries) await walkEntry(en, '', out);
+  } else {
+    plainFiles.forEach((f) => out.push({ file: f, path: f.name }));
+  }
+  return out;
+}
+
+const dropZone = $('drop-zone');
+['dragenter', 'dragover'].forEach((ev) => document.addEventListener(ev, (e) => {
+  e.preventDefault();
+  dropZone.classList.add('over');
+}));
+document.addEventListener('dragleave', (e) => {
+  if (!e.relatedTarget) dropZone.classList.remove('over');
+});
+document.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('over');
+  try {
+    const list = await collectFromDataTransfer(e.dataTransfer);
+    await openEntries(list);
+  } catch (err) {
+    hideLoading();
+    showToast('ドロップしたファイルを読み込めませんでした');
+  }
+});
+
+/* =========================================================
+ * 6. ページ一覧の作成
+ * ======================================================= */
+function dirOf(path) {
+  const i = path.lastIndexOf('/');
+  return i < 0 ? '' : path.slice(0, i);
+}
+
+async function openEntries(list) {
+  const items = list.filter(isSupported);
+  if (!items.length) {
+    showToast('対応する画像またはPDFが見つかりませんでした');
     return;
   }
+  items.sort((a, b) => collator.compare(a.path, b.path));
 
-  // 自然順ソート (01.webp, 2.webp, 10.webp の順に並ぶ)
-  rawFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+  const newPages = [];
+  let skippedPdf = 0;
+  let failed = 0;
 
-  setupScreen.style.display = 'none';
-  viewerScreen.style.display = 'block';
-  loadingEl.style.display = 'block';
-
-  pagesList = [];
-  cachedDocs.clear();
-  clearObjectUrls();
-
-  for (let i = 0; i < rawFiles.length; i++) {
-    const file = rawFiles[i];
+  for (let i = 0; i < items.length; i++) {
+    const { file, path } = items[i];
+    const dir = dirOf(path);
     if (PDF_EXT.test(file.name) || file.type === 'application/pdf') {
-      if (!pdfJsReady) continue;
-      loadingEl.textContent = `ファイル解析中 (${i + 1} / ${rawFiles.length})...`;
+      if (!pdfJsReady) { skippedPdf++; continue; }
+      showLoading(`ファイルを解析中 (${i + 1} / ${items.length})`, i / items.length);
       try {
-        const arrayBuffer = await file.arrayBuffer();
-        const doc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const buf = await file.arrayBuffer();
+        const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
         for (let p = 1; p <= doc.numPages; p++) {
-          pagesList.push({ type: 'pdf', file, fileName: file.name, pageNum: p });
+          newPages.push({ type: 'pdf', file, name: file.name, dir, pageNum: p });
         }
-        doc.destroy();
+        await doc.destroy();
       } catch (err) {
         console.error('PDF読込失敗:', file.name, err);
+        failed++;
       }
     } else {
-      // 画像ファイルはスキャン不要で即リスト化（超高速）
-      pagesList.push({ type: 'image', file, fileName: file.name });
+      newPages.push({ type: 'image', file, name: file.name, dir });
     }
   }
+  hideLoading();
 
-  loadingEl.style.display = 'none';
-  if (pagesList.length === 0) {
-    alert('読み込めるファイルがありませんでした。');
-    resetToSetup();
+  if (!newPages.length) {
+    showToast(skippedPdf ? 'PDFを読むには pdf.min.js が必要です' : '読み込めるファイルがありませんでした');
     return;
   }
 
+  // 前の内容を片付けてから切り替え
+  resetViewerState();
+  pagesList = newPages;
   currentIndex = 0;
   slider.max = pagesList.length - 1;
-  renderCurrentView();
+
+  setupScreen.style.display = 'none';
+  viewerScreen.classList.add('active');
+  viewerScreen.classList.add('ui-hidden');
+  updateModeUI();
+  await renderCurrentView();
+  showHintOnce();
+
+  if (skippedPdf || failed) {
+    const parts = [];
+    if (skippedPdf) parts.push(`PDF ${skippedPdf}件は未対応でスキップ`);
+    if (failed) parts.push(`${failed}件は読み込み失敗`);
+    showToast(parts.join(' / '), null, null, 5000);
+  }
 }
 
-function clearObjectUrls() {
-  activeObjectUrls.forEach(url => URL.revokeObjectURL(url));
-  activeObjectUrls = [];
+function resetViewerState() {
+  renderToken++;
+  cachedDocs.forEach((doc) => { try { doc.destroy(); } catch (e) {} });
+  cachedDocs.clear();
+  releaseUrl(1); releaseUrl(2);
+  pagesList = [];
 }
 
+function releaseUrl(n) {
+  if (slotUrls[n]) { URL.revokeObjectURL(slotUrls[n]); slotUrls[n] = null; }
+}
+
+/* =========================================================
+ * 7. 描画
+ * ======================================================= */
 async function getPdfDoc(file) {
-  if (cachedDocs.has(file.name)) return cachedDocs.get(file.name);
+  if (cachedDocs.has(file)) return cachedDocs.get(file);
   if (cachedDocs.size >= 3) {
-    const oldestKey = cachedDocs.keys().next().value;
-    cachedDocs.get(oldestKey).destroy();
-    cachedDocs.delete(oldestKey);
+    const oldest = cachedDocs.keys().next().value;
+    try { cachedDocs.get(oldest).destroy(); } catch (e) {}
+    cachedDocs.delete(oldest);
   }
   const buf = await file.arrayBuffer();
-  const doc = await pdfjsLib.getDocument({ data: buf }).promise;
-  cachedDocs.set(file.name, doc);
+  const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+  cachedDocs.set(file, doc);
   return doc;
 }
 
-async function renderSlot(slotNum, pageItem, isHalfWidth) {
-  const slot = document.getElementById(`slot-${slotNum}`);
-  const canvas = document.getElementById(`canvas-${slotNum}`);
-  const img = document.getElementById(`img-${slotNum}`);
+function stageSize() {
+  const cs = getComputedStyle(container);
+  return {
+    w: container.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
+    h: container.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom),
+  };
+}
 
-  if (!pageItem) {
+async function renderSlot(n, item, half, token) {
+  const slot = $(`slot-${n}`);
+  const canvas = $(`canvas-${n}`);
+  const img = $(`img-${n}`);
+
+  if (!item) {
     slot.style.display = 'none';
     canvas.style.display = 'none';
     img.style.display = 'none';
+    img.removeAttribute('src');
+    releaseUrl(n);
     return;
   }
 
-  slot.style.display = 'flex';
-
-  if (pageItem.type === 'image') {
-    canvas.style.display = 'none';
-    img.style.display = 'block';
-    const url = URL.createObjectURL(pageItem.file);
-    activeObjectUrls.push(url);
+  if (item.type === 'image') {
+    const url = URL.createObjectURL(item.file);
+    try { const pre = new Image(); pre.src = url; await pre.decode(); } catch (e) {}
+    if (token !== renderToken) { URL.revokeObjectURL(url); return; }
+    releaseUrl(n);
+    slotUrls[n] = url;
     img.src = url;
+    img.style.display = 'block';
+    canvas.style.display = 'none';
+    slot.style.display = 'flex';
   } else {
-    img.style.display = 'none';
-    canvas.style.display = 'block';
-    const ctx = canvas.getContext('2d', { alpha: false });
-    const doc = await getPdfDoc(pageItem.file);
-    const page = await doc.getPage(pageItem.pageNum);
+    const doc = await getPdfDoc(item.file);
+    const page = await doc.getPage(item.pageNum);
+    if (token !== renderToken) return;
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const targetWidth = (isHalfWidth ? window.innerWidth / 2 : window.innerWidth) * dpr;
-    const targetHeight = window.innerHeight * dpr;
-
-    const unscaledViewport = page.getViewport({ scale: 1 });
-    const scale = Math.min(targetWidth / unscaledViewport.width, targetHeight / unscaledViewport.height);
+    const { w, h } = stageSize();
+    const targetW = (half ? (w - 2) / 2 : w) * dpr;
+    const targetH = h * dpr;
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(targetW / base.width, targetH / base.height);
     const viewport = page.getViewport({ scale });
 
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    await page.render({ canvasContext: ctx, viewport }).promise;
+    // 裏のcanvasに描いてから差し替える（ちらつき防止）
+    const off = document.createElement('canvas');
+    off.width = Math.floor(viewport.width);
+    off.height = Math.floor(viewport.height);
+    await page.render({ canvasContext: off.getContext('2d', { alpha: false }), viewport }).promise;
+    if (token !== renderToken) return;
+
+    canvas.width = off.width;
+    canvas.height = off.height;
+    canvas.getContext('2d').drawImage(off, 0, 0);
+    img.style.display = 'none';
+    img.removeAttribute('src');
+    releaseUrl(n);
+    canvas.style.display = 'block';
+    slot.style.display = 'flex';
   }
 }
 
 async function renderCurrentView() {
-  if (pagesList.length === 0) return;
+  if (!pagesList.length) return;
+  const token = ++renderToken;
 
   const item1 = pagesList[currentIndex];
   const item2 = (isSpread && currentIndex + 1 < pagesList.length) ? pagesList[currentIndex + 1] : null;
 
-  // PDFが含まれる時だけローディング表示（画像のみなら一瞬で切り替わるため不要）
-  const hasPdf = item1.type === 'pdf' || (item2 && item2.type === 'pdf');
-  if (hasPdf) loadingEl.style.display = 'block';
-
-  document.getElementById('file-title').textContent = item1.fileName;
-  const pageLabel = item2 ? `${currentIndex + 1}-${currentIndex + 2} / ${pagesList.length}` : `${currentIndex + 1} / ${pagesList.length}`;
-  document.getElementById('page-info').textContent = pageLabel;
+  // 先に表示情報を更新（体感を速く）
+  $('file-title').textContent = item1.name;
+  const sub = [];
+  if (item1.dir) sub.push(item1.dir);
+  if (item1.type === 'pdf') sub.push('PDF p.' + item1.pageNum);
+  $('file-sub').textContent = sub.join(' ・ ');
+  $('page-info').textContent = item2
+    ? `${currentIndex + 1}-${currentIndex + 2} / ${pagesList.length}`
+    : `${currentIndex + 1} / ${pagesList.length}`;
   slider.value = currentIndex;
+  const progress = pagesList.length > 1 ? (currentIndex + (item2 ? 1 : 0)) / (pagesList.length - 1) : 1;
+  $('edge-progress').style.transform = `scaleX(${Math.min(1, progress)})`;
 
-  container.classList.toggle('spread-mode', isSpread);
+  container.classList.toggle('spread-mode', !!item2);
 
-  // 前回表示していた画像のメモリを解放
-  clearObjectUrls();
-
+  const hasPdf = item1.type === 'pdf' || (item2 && item2.type === 'pdf');
+  if (hasPdf) showLoading('ページを描画中…', 0.5);
   try {
     await Promise.all([
-      renderSlot(1, item1, isSpread),
-      renderSlot(2, item2, isSpread)
+      renderSlot(1, item1, !!item2, token),
+      renderSlot(2, item2, !!item2, token),
     ]);
-  } catch (e) {}
-
-  loadingEl.style.display = 'none';
-
-  // 次ページの先読み（画像ファイルの場合、ブラウザキャッシュに乗せてページめくりをゼロ遅延化）
-  const nextIdx = currentIndex + (isSpread ? 2 : 1);
-  if (nextIdx < pagesList.length && pagesList[nextIdx].type === 'image') {
-    const preloadImg = new Image();
-    const preloadUrl = URL.createObjectURL(pagesList[nextIdx].file);
-    preloadImg.onload = () => URL.revokeObjectURL(preloadUrl);
-    preloadImg.src = preloadUrl;
+  } catch (err) {
+    console.error(err);
+    if (token === renderToken) showToast('このページを表示できませんでした');
   }
+  if (hasPdf && token === renderToken) hideLoading();
 }
 
+/* =========================================================
+ * 8. 操作（タップ・スワイプ・キー・スライダー・各ボタン）
+ * ======================================================= */
 function goNext() {
   const step = isSpread ? 2 : 1;
-  if (currentIndex + step < pagesList.length) {
-    currentIndex += step;
-    renderCurrentView();
-  }
+  if (currentIndex + step < pagesList.length) { currentIndex += step; renderCurrentView(); }
 }
-
 function goPrev() {
   const step = isSpread ? 2 : 1;
-  if (currentIndex - step >= 0) {
-    currentIndex -= step;
-    renderCurrentView();
-  } else if (currentIndex > 0) {
-    currentIndex = 0;
-    renderCurrentView();
-  }
+  if (currentIndex - step >= 0) { currentIndex -= step; renderCurrentView(); }
+  else if (currentIndex > 0) { currentIndex = 0; renderCurrentView(); }
 }
 
-document.getElementById('tap-left').onclick = () => isRtl ? goNext() : goPrev();
-document.getElementById('tap-right').onclick = () => isRtl ? goPrev() : goNext();
-document.getElementById('tap-center').onclick = () => viewerScreen.classList.toggle('ui-hidden');
+$('tap-left').onclick = () => (isRtl ? goNext() : goPrev());
+$('tap-right').onclick = () => (isRtl ? goPrev() : goNext());
+$('tap-center').onclick = () => viewerScreen.classList.toggle('ui-hidden');
 
-window.addEventListener('keydown', e => {
-  if (viewerScreen.style.display !== 'block') return;
-  if (e.key === 'ArrowLeft') isRtl ? goNext() : goPrev();
-  if (e.key === 'ArrowRight') isRtl ? goPrev() : goNext();
+window.addEventListener('keydown', (e) => {
+  if (!viewerScreen.classList.contains('active')) return;
+  if (e.key === 'ArrowLeft') (isRtl ? goNext : goPrev)();
+  else if (e.key === 'ArrowRight') (isRtl ? goPrev : goNext)();
+  else if (e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); goNext(); }
+  else if (e.key === 'PageUp') { e.preventDefault(); goPrev(); }
 });
+
+// スワイプ（右綴じ: 右へスワイプで次、左綴じ: 左へスワイプで次）
+let touchStart = null;
+viewerScreen.addEventListener('touchstart', (e) => {
+  if (e.target === slider || e.touches.length !== 1) { touchStart = null; return; }
+  touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+}, { passive: true });
+viewerScreen.addEventListener('touchend', (e) => {
+  if (!touchStart) return;
+  const t = e.changedTouches[0];
+  const dx = t.clientX - touchStart.x;
+  const dy = t.clientY - touchStart.y;
+  touchStart = null;
+  if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+  const toNext = isRtl ? dx > 0 : dx < 0;
+  toNext ? goNext() : goPrev();
+}, { passive: true });
 
 let resizeTimer;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(renderCurrentView, 200);
+  resizeTimer = setTimeout(() => {
+    if (viewerScreen.classList.contains('active')) renderCurrentView();
+  }, 250);
 });
 
-document.getElementById('spread-btn').onclick = (e) => {
+function updateModeUI() {
+  const spreadBtn = $('spread-btn');
+  spreadBtn.classList.toggle('active', isSpread);
+  spreadBtn.setAttribute('aria-pressed', String(isSpread));
+  $('dir-btn').textContent = isRtl ? '右綴じ' : '左綴じ';
+  container.classList.remove('rtl', 'ltr');
+  container.classList.add(isRtl ? 'rtl' : 'ltr');
+  slider.classList.toggle('rtl', isRtl);
+  $('edge-progress').style.transformOrigin = isRtl ? 'right center' : 'left center';
+  $('hint-left').innerHTML = isRtl ? '次へ<small>左タップ</small>' : '前へ<small>左タップ</small>';
+  $('hint-right').innerHTML = isRtl ? '前へ<small>右タップ</small>' : '次へ<small>右タップ</small>';
+}
+
+$('spread-btn').onclick = () => {
   isSpread = !isSpread;
-  e.target.textContent = isSpread ? '2ページ見開き' : '1ページ';
-  e.target.classList.toggle('active', isSpread);
+  saveSettings();
+  updateModeUI();
   renderCurrentView();
 };
-
-document.getElementById('dir-btn').onclick = (e) => {
+$('dir-btn').onclick = () => {
   isRtl = !isRtl;
-  e.target.textContent = isRtl ? '右綴じ' : '左綴じ';
-  container.className = (isRtl ? 'rtl' : 'ltr') + (isSpread ? ' spread-mode' : '');
-  slider.className = isRtl ? 'rtl' : '';
+  saveSettings();
+  updateModeUI();
+  renderCurrentView();
 };
-
 slider.oninput = (e) => {
   currentIndex = parseInt(e.target.value, 10);
   renderCurrentView();
 };
 
-document.getElementById('back-btn').onclick = resetToSetup;
-function resetToSetup() {
-  cachedDocs.forEach(doc => doc.destroy());
-  cachedDocs.clear();
-  clearObjectUrls();
-  pagesList = [];
-  viewerScreen.style.display = 'none';
-  setupScreen.style.display = 'flex';
+function showHintOnce() {
+  let seen = false;
+  try { seen = localStorage.getItem('reader-hint-v1') === '1'; } catch (e) {}
+  if (seen) return;
+  try { localStorage.setItem('reader-hint-v1', '1'); } catch (e) {}
+  const hint = $('hint');
+  hint.classList.add('show');
+  setTimeout(() => hint.classList.remove('show'), 3100);
 }
+
+$('back-btn').onclick = () => {
+  resetViewerState();
+  viewerScreen.classList.remove('active');
+  setupScreen.style.display = 'flex';
+};
+
+updateModeUI();
 </script>
 </body>
 </html>

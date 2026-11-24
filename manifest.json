@@ -1,0 +1,14 @@
+{
+  "name": "マンガ・画像・PDFリーダー",
+  "short_name": "リーダー",
+  "description": "端末内の画像・PDFをオフラインで読めるリーダー",
+  "lang": "ja",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0e0f12",
+  "theme_color": "#0e0f12",
+  "icons": [
+    { "src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
