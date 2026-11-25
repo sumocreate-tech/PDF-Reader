@@ -133,6 +133,16 @@
   details.help summary::after { content: "＋"; color: var(--muted); }
   details.help[open] summary::after { content: "－"; }
   details.help ul { padding: 0 16px 14px 34px; display: grid; gap: 8px; line-height: 1.6; }
+  /* 履歴 */
+  .history { text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .history[hidden] { display: none; }
+  .history-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--line); }
+  .link-btn { background: none; border: 0; color: var(--muted); font-size: 12px; cursor: pointer; padding: 4px 0; }
+  .hist-item { display: block; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line); padding: 12px 16px; cursor: pointer; }
+  .hist-item:last-child { border-bottom: 0; }
+  .hist-item:active { background: var(--panel2); }
+  .hist-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hist-meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
   input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
 
   /* ========== ビューア ========== */
@@ -145,6 +155,7 @@
     gap: 2px;
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
+  #media-container { transform-origin: 0 0; }
   #media-container.rtl { flex-direction: row-reverse; }
   #media-container.ltr { flex-direction: row; }
   .page-slot {
@@ -160,7 +171,7 @@
   canvas { background: #fff; }
 
   /* タップ領域 */
-  .tap-zone { position: absolute; top: 0; height: 100%; z-index: 10; }
+  .tap-zone { position: absolute; top: 0; height: 100%; z-index: 10; touch-action: none; }
   #tap-left { left: 0; width: 32%; }
   #tap-center { left: 32%; width: 36%; }
   #tap-right { right: 0; width: 32%; }
@@ -331,6 +342,11 @@
         ここにフォルダやファイルを<br>ドラッグ＆ドロップでも開けます
       </div>
 
+      <section id="history" class="history" hidden>
+        <div class="history-head"><span>最近開いたPDF</span><button class="link-btn" id="history-clear">履歴を消す</button></div>
+        <div id="history-list"></div>
+      </section>
+
       <details class="help">
         <summary>使い方・メモ</summary>
         <ul>
@@ -339,6 +355,8 @@
           <li>フォルダ選択が使えない端末（iOS 18.3 以前など）では、「ファイルを選ぶ」でフォルダ内を全選択するか、ドラッグ＆ドロップを使ってください。</li>
           <li>日本語のPDFを初めて開くときだけ、文字データ（cMap）を取得するためネット接続が必要です。一度開けば以降はオフラインでも表示できます。</li>
           <li>操作: 左右タップでページ送り、中央タップでメニュー、左右スワイプも使えます。</li>
+          <li>拡大: 2本指でピンチ、拡大中は1本指で移動できます（ページを送ると元に戻ります）。メニューの「拡大ロック」で拡大を無効にできます。</li>
+          <li>履歴: 最近開いたPDFを5件まで端末内に保存し、前回のページから続きを開けます（150MBを超えるPDFは保存しません）。</li>
           <li>オフライン: 初回だけネットに繋いで開けば、以降は機内モードでも起動できます。ファイルはどこにも送信されません。</li>
         </ul>
       </details>
@@ -376,6 +394,7 @@
         <div id="file-sub"></div>
       </div>
       <div class="toggles">
+        <button class="pill" id="zoom-btn" aria-pressed="false">拡大ロック</button>
         <button class="pill" id="spread-btn" aria-pressed="false">見開き</button>
         <button class="pill" id="dir-btn">右綴じ</button>
       </div>
@@ -414,7 +433,7 @@ function loadSettings() {
   try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'); } catch (e) { return {}; }
 }
 function saveSettings() {
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ isSpread, isRtl })); } catch (e) {}
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ isSpread, isRtl, zoomLocked })); } catch (e) {}
 }
 
 /* =========================================================
@@ -527,6 +546,7 @@ const collator = new Intl.Collator('ja', { numeric: true, sensitivity: 'base' })
 const saved = loadSettings();
 let isSpread = !!saved.isSpread;
 let isRtl = saved.isRtl !== false; // 既定は右綴じ
+let zoomLocked = !!saved.zoomLocked; // 拡大ロック
 
 let pagesList = []; // { type:'image'|'pdf', file, name, dir, pageNum? }
 let currentIndex = 0;
@@ -657,7 +677,7 @@ function dirOf(path) {
   return i < 0 ? '' : path.slice(0, i);
 }
 
-async function openEntries(list) {
+async function openEntries(list, startPage = 0) {
   const items = list.filter(isSupported);
   if (!items.length) {
     showToast('対応する画像またはPDFが見つかりませんでした');
@@ -704,7 +724,7 @@ async function openEntries(list) {
   resetViewerState();
   opened.forEach((d, f) => cachedDocs.set(f, Promise.resolve(d)));
   pagesList = newPages;
-  currentIndex = 0;
+  currentIndex = Math.max(0, Math.min(startPage, newPages.length - 1));
   slider.max = pagesList.length - 1;
 
   setupScreen.style.display = 'none';
@@ -762,17 +782,20 @@ const activeTasks = new Set();
 function fileId(f) { if (!fileIds.has(f)) fileIds.set(f, ++fileSeq); return fileIds.get(f); }
 function cancelRenders() { activeTasks.forEach((t) => { try { t.cancel(); } catch (e) {} }); }
 
-async function getPdfCanvas(item, half) {
+const MAX_CANVAS_PIXELS = 8e6; // 古いiPadでメモリを使いすぎない上限
+async function getPdfCanvas(item, half, boost = 1) {
   const doc = await getPdfDoc(item.file);
   const page = await doc.getPage(item.pageNum);
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const { w, h } = stageSize();
-  const targetW = (half ? (w - 2) / 2 : w) * dpr;
-  const targetH = h * dpr;
+  const targetW = (half ? (w - 2) / 2 : w) * dpr * boost;
+  const targetH = h * dpr * boost;
   const base = page.getViewport({ scale: 1 });
-  const scale = Math.min(targetW / base.width, targetH / base.height);
+  let scale = Math.min(targetW / base.width, targetH / base.height);
+  const area = base.width * base.height * scale * scale;
+  if (area > MAX_CANVAS_PIXELS) scale *= Math.sqrt(MAX_CANVAS_PIXELS / area);
   const viewport = page.getViewport({ scale });
-  const key = fileId(item.file) + ':' + item.pageNum + ':' + Math.floor(viewport.width) + 'x' + Math.floor(viewport.height);
+  const key = fileId(item.file) + ':' + item.pageNum + ':' + Math.floor(viewport.width) + 'x' + Math.floor(viewport.height) + ':' + boost;
   if (pageCache.has(key)) { const c = pageCache.get(key); pageCache.delete(key); pageCache.set(key, c); return c; }
 
   // 裏のcanvasに描いてから差し替える（ちらつき防止）
@@ -784,9 +807,29 @@ async function getPdfCanvas(item, half) {
   try { await task.promise; }
   catch (e) { if (e && e.name === 'RenderingCancelledException') return null; throw e; }
   finally { activeTasks.delete(task); }
+  if (boost > 1) return off; // 高解像度版はキャッシュしない（メモリ節約）
   pageCache.set(key, off);
   while (pageCache.size > 5) pageCache.delete(pageCache.keys().next().value);
   return off;
+}
+
+// 拡大して止めたら、見えている範囲が滲まないよう高解像度で描き直す
+async function sharpenCurrent() {
+  if (Z.s < 1.2 || !pagesList.length) return;
+  const token = renderToken;
+  const item1 = pagesList[currentIndex];
+  const item2 = (isSpread && currentIndex + 1 < pagesList.length) ? pagesList[currentIndex + 1] : null;
+  const boost = Math.min(Z.s, 4);
+  const jobs = [[1, item1], [2, item2]].filter(([, it]) => it && it.type === 'pdf');
+  await Promise.all(jobs.map(async ([n, it]) => {
+    try {
+      const off = await getPdfCanvas(it, !!item2, boost);
+      if (!off || token !== renderToken) return;
+      const c = $(`canvas-${n}`);
+      c.width = off.width; c.height = off.height;
+      c.getContext('2d').drawImage(off, 0, 0);
+    } catch (e) {}
+  }));
 }
 
 // 表示が落ち着いたら、次のページを裏で描いておく（めくった瞬間に出る）
@@ -857,6 +900,7 @@ async function renderCurrentView() {
   if (!pagesList.length) return;
   const token = ++renderToken;
   cancelRenders();
+  resetZoom();
 
   const item1 = pagesList[currentIndex];
   const item2 = (isSpread && currentIndex + 1 < pagesList.length) ? pagesList[currentIndex + 1] : null;
@@ -889,6 +933,7 @@ async function renderCurrentView() {
   }
   clearTimeout(loadTimer);
   if (hasPdf && token === renderToken) { hideLoading(); schedulePrefetch(token); }
+  if (token === renderToken) scheduleHistory();
 }
 
 /* =========================================================
@@ -904,9 +949,11 @@ function goPrev() {
   else if (currentIndex > 0) { currentIndex = 0; renderCurrentView(); }
 }
 
-$('tap-left').onclick = () => (isRtl ? goNext() : goPrev());
-$('tap-right').onclick = () => (isRtl ? goPrev() : goNext());
-$('tap-center').onclick = () => viewerScreen.classList.toggle('ui-hidden');
+// ピンチ/ドラッグの直後に出る「ゴーストタップ」でページが送られないようにする
+const tapGuard = (fn) => () => { if (performance.now() - lastGestureAt > 350) fn(); };
+$('tap-left').onclick = tapGuard(() => (isRtl ? goNext() : goPrev()));
+$('tap-right').onclick = tapGuard(() => (isRtl ? goPrev() : goNext()));
+$('tap-center').onclick = tapGuard(() => viewerScreen.classList.toggle('ui-hidden'));
 
 window.addEventListener('keydown', (e) => {
   if (!viewerScreen.classList.contains('active')) return;
@@ -916,22 +963,102 @@ window.addEventListener('keydown', (e) => {
   else if (e.key === 'PageUp') { e.preventDefault(); goPrev(); }
 });
 
-// スワイプ（右綴じ: 右へスワイプで次、左綴じ: 左へスワイプで次）
-let touchStart = null;
+/* ---- 拡大（ピンチ）・移動・スワイプ ---- */
+const MAX_ZOOM = 5;
+const Z = { s: 1, x: 0, y: 0 };
+let lastGestureAt = 0;
+let tState = null;
+let sharpenTimer;
+function applyZoom() { container.style.transform = Z.s === 1 ? '' : `translate(${Z.x}px, ${Z.y}px) scale(${Z.s})`; }
+function clampZoom() {
+  const W = viewerScreen.clientWidth, H = viewerScreen.clientHeight;
+  Z.x = Math.min(0, Math.max(W - W * Z.s, Z.x));
+  Z.y = Math.min(0, Math.max(H - H * Z.s, Z.y));
+}
+function resetZoom() { Z.s = 1; Z.x = 0; Z.y = 0; applyZoom(); clearTimeout(sharpenTimer); }
+function scheduleSharpen() { clearTimeout(sharpenTimer); sharpenTimer = setTimeout(sharpenCurrent, 250); }
+function zoomAt(cx, cy, ns) {
+  ns = Math.min(MAX_ZOOM, Math.max(1, ns));
+  if (ns < 1.05) { resetZoom(); return; }
+  Z.x = cx - (cx - Z.x) / Z.s * ns;
+  Z.y = cy - (cy - Z.y) / Z.s * ns;
+  Z.s = ns;
+  clampZoom(); applyZoom();
+}
+const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+const mid = (a, b) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 });
+function startOne(t) {
+  tState = { mode: Z.s > 1 ? 'pan' : 'swipe', sx: t.clientX, sy: t.clientY, x0: Z.x, y0: Z.y, moved: false };
+}
+
 viewerScreen.addEventListener('touchstart', (e) => {
-  if (e.target === slider || e.touches.length !== 1) { touchStart = null; return; }
-  touchStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  if (e.target === slider || (e.target.closest && e.target.closest('.ui-bar'))) { tState = null; return; }
+  if (e.touches.length === 2 && !zoomLocked) {
+    const [a, b] = e.touches, c = mid(a, b);
+    tState = { mode: 'pinch', d0: dist(a, b), s0: Z.s, cx0: c.x, cy0: c.y, x0: Z.x, y0: Z.y };
+  } else if (e.touches.length === 1) {
+    startOne(e.touches[0]);
+  } else {
+    tState = null;
+  }
 }, { passive: true });
+
+viewerScreen.addEventListener('touchmove', (e) => {
+  if (!tState) return;
+  if (tState.mode === 'pinch') {
+    if (e.touches.length !== 2) return;
+    const [a, b] = e.touches, c = mid(a, b);
+    const ns = Math.min(MAX_ZOOM, Math.max(1, tState.s0 * dist(a, b) / tState.d0));
+    Z.s = ns;
+    Z.x = c.x - (tState.cx0 - tState.x0) / tState.s0 * ns;
+    Z.y = c.y - (tState.cy0 - tState.y0) / tState.s0 * ns;
+    clampZoom(); applyZoom();
+    tState.moved = true;
+  } else if (e.touches.length === 1) {
+    const t = e.touches[0];
+    const dx = t.clientX - tState.sx, dy = t.clientY - tState.sy;
+    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) tState.moved = true;
+    if (tState.mode === 'pan') {
+      Z.x = tState.x0 + dx; Z.y = tState.y0 + dy;
+      clampZoom(); applyZoom();
+    }
+  }
+}, { passive: true });
+
 viewerScreen.addEventListener('touchend', (e) => {
-  if (!touchStart) return;
+  if (!tState) return;
+  const st = tState;
+  if (st.mode === 'pinch') {
+    lastGestureAt = performance.now();
+    if (Z.s < 1.05) resetZoom(); else scheduleSharpen();
+    if (e.touches.length === 1) startOne(e.touches[0]); else tState = null;
+    return;
+  }
+  tState = null;
+  if (st.moved) lastGestureAt = performance.now();
+  if (st.mode === 'pan' || e.touches.length) return;
+  // スワイプ（右綴じ: 右へスワイプで次、左綴じ: 左へスワイプで次）
   const t = e.changedTouches[0];
-  const dx = t.clientX - touchStart.x;
-  const dy = t.clientY - touchStart.y;
-  touchStart = null;
+  const dx = t.clientX - st.sx, dy = t.clientY - st.sy;
   if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
   const toNext = isRtl ? dx > 0 : dx < 0;
   toNext ? goNext() : goPrev();
 }, { passive: true });
+viewerScreen.addEventListener('touchcancel', () => { tState = null; }, { passive: true });
+
+// PCのトラックパッド/マウス: Ctrl+ホイールで拡大、拡大中はホイールで移動
+viewerScreen.addEventListener('wheel', (e) => {
+  if (zoomLocked || !viewerScreen.classList.contains('active')) return;
+  if (e.ctrlKey) {
+    e.preventDefault();
+    zoomAt(e.clientX, e.clientY, Z.s * Math.exp(-e.deltaY * 0.01));
+    scheduleSharpen();
+  } else if (Z.s > 1) {
+    e.preventDefault();
+    Z.x -= e.deltaX; Z.y -= e.deltaY;
+    clampZoom(); applyZoom();
+  }
+}, { passive: false });
 
 let resizeTimer;
 window.addEventListener('resize', () => {
@@ -946,6 +1073,8 @@ function updateModeUI() {
   spreadBtn.classList.toggle('active', isSpread);
   spreadBtn.setAttribute('aria-pressed', String(isSpread));
   $('dir-btn').textContent = isRtl ? '右綴じ' : '左綴じ';
+  $('zoom-btn').classList.toggle('active', zoomLocked);
+  $('zoom-btn').setAttribute('aria-pressed', String(zoomLocked));
   container.classList.remove('rtl', 'ltr');
   container.classList.add(isRtl ? 'rtl' : 'ltr');
   slider.classList.toggle('rtl', isRtl);
@@ -959,6 +1088,13 @@ $('spread-btn').onclick = () => {
   saveSettings();
   updateModeUI();
   renderCurrentView();
+};
+$('zoom-btn').onclick = () => {
+  zoomLocked = !zoomLocked;
+  saveSettings();
+  updateModeUI();
+  if (zoomLocked) resetZoom();
+  showToast(zoomLocked ? '拡大をロックしました' : '拡大できます（2本指でピンチ）', null, null, 1800);
 };
 $('dir-btn').onclick = () => {
   isRtl = !isRtl;
@@ -985,12 +1121,105 @@ function showHintOnce() {
 }
 
 $('back-btn').onclick = () => {
+  const saving = recordHistoryNow(); // 先に今のページを記録してから片付ける
   resetViewerState();
+  resetZoom();
   viewerScreen.classList.remove('active');
   setupScreen.style.display = 'flex';
+  saving.then(renderHistory);
 };
 
+/* =========================================================
+ * 9. 履歴（最近開いたPDFを端末内に保存。IndexedDB）
+ *    PDF本体も保存するので、履歴からワンタップで前回のページから開ける
+ * ======================================================= */
+const HISTORY_MAX = 5;
+const HISTORY_MAX_BYTES = 150 * 1024 * 1024;
+let dbPromise;
+function db() {
+  if (!dbPromise) dbPromise = new Promise((res, rej) => {
+    const r = indexedDB.open('reader-db', 1);
+    r.onupgradeneeded = () => { r.result.createObjectStore('meta', { keyPath: 'key' }); r.result.createObjectStore('blobs'); };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  return dbPromise;
+}
+async function idb(store, mode, fn) {
+  const d = await db();
+  return new Promise((res, rej) => {
+    const t = d.transaction(store, mode);
+    const req = fn(t.objectStore(store));
+    t.oncomplete = () => res(req && req.result);
+    t.onerror = t.onabort = () => rej(t.error);
+  });
+}
+const fileKey = (f) => f.name + '|' + f.size + '|' + f.lastModified;
+
+async function touchHistory(file, page, total) {
+  if (file.size > HISTORY_MAX_BYTES) return;
+  try {
+    const key = fileKey(file);
+    const old = await idb('meta', 'readonly', (s) => s.get(key));
+    if (!old) await idb('blobs', 'readwrite', (s) => s.put(file, key)); // 本体は初回だけ保存
+    await idb('meta', 'readwrite', (s) => s.put({ key, name: file.name, size: file.size, lastModified: file.lastModified, page, total, at: Date.now() }));
+    const all = (await idb('meta', 'readonly', (s) => s.getAll())).sort((a, b) => b.at - a.at);
+    for (const m of all.slice(HISTORY_MAX)) {
+      await idb('meta', 'readwrite', (s) => s.delete(m.key));
+      await idb('blobs', 'readwrite', (s) => s.delete(m.key));
+    }
+  } catch (e) {}
+}
+let historyTimer;
+function scheduleHistory() { clearTimeout(historyTimer); historyTimer = setTimeout(recordHistoryNow, 800); }
+function recordHistoryNow() {
+  clearTimeout(historyTimer);
+  const item = pagesList[currentIndex];
+  if (!item || item.type !== 'pdf') return Promise.resolve();
+  const total = pagesList.filter((p) => p.file === item.file).length;
+  return touchHistory(item.file, item.pageNum, total);
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) recordHistoryNow(); });
+
+const fmtTime = (t) => new Date(t).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+async function renderHistory() {
+  let list = [];
+  try { list = await idb('meta', 'readonly', (s) => s.getAll()); } catch (e) {}
+  list.sort((a, b) => b.at - a.at);
+  const el = $('history-list');
+  el.textContent = '';
+  $('history').hidden = !list.length;
+  list.slice(0, HISTORY_MAX).forEach((m) => {
+    const b = document.createElement('button');
+    b.className = 'hist-item';
+    const n = document.createElement('div'); n.className = 'hist-name'; n.textContent = m.name;
+    const t = document.createElement('div'); t.className = 'hist-meta'; t.textContent = `p.${m.page} / ${m.total} ・ ${fmtTime(m.at)}`;
+    b.append(n, t);
+    b.onclick = () => openFromHistory(m.key);
+    el.appendChild(b);
+  });
+}
+async function openFromHistory(key) {
+  try {
+    const meta = await idb('meta', 'readonly', (s) => s.get(key));
+    const blob = await idb('blobs', 'readonly', (s) => s.get(key));
+    if (!meta || !blob) throw new Error('missing');
+    const file = new File([blob], meta.name, { type: 'application/pdf', lastModified: meta.lastModified });
+    await openEntries([{ file, path: meta.name }], meta.page - 1);
+  } catch (e) {
+    showToast('保存したPDFを開けませんでした');
+    renderHistory();
+  }
+}
+$('history-clear').onclick = async () => {
+  try { await idb('meta', 'readwrite', (s) => s.clear()); await idb('blobs', 'readwrite', (s) => s.clear()); } catch (e) {}
+  renderHistory();
+  showToast('履歴を消しました', null, null, 1800);
+};
+
+
 updateModeUI();
+renderHistory();
 </script>
 </body>
 </html>
