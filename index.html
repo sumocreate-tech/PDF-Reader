@@ -23,7 +23,7 @@
     --accent: #6cc4b1;
     --accent-soft: rgba(108, 196, 177, 0.18);
     --on-accent: #0c1f1b;
-    --bar: rgba(20, 21, 26, 0.88);
+    --bar: rgba(20, 21, 26, 0.96);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; }
@@ -170,8 +170,6 @@
     position: absolute; left: 0; width: 100%;
     z-index: 20;
     background: var(--bar);
-    -webkit-backdrop-filter: blur(16px) saturate(1.4);
-    backdrop-filter: blur(16px) saturate(1.4);
     transition: opacity 0.2s, transform 0.2s;
   }
   #top-bar {
@@ -265,7 +263,6 @@
     position: fixed; inset: 0; z-index: 50;
     display: none; align-items: center; justify-content: center;
     background: rgba(0, 0, 0, 0.55);
-    -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
   }
   #loading.show { display: flex; }
   .loading-box {
@@ -671,6 +668,7 @@ async function openEntries(list) {
   const newPages = [];
   let skippedPdf = 0;
   let failed = 0;
+  const opened = new Map(); // 解析済みPDFを表示にそのまま引き継ぐ
 
   for (let i = 0; i < items.length; i++) {
     const { file, path } = items[i];
@@ -684,7 +682,8 @@ async function openEntries(list) {
         for (let p = 1; p <= doc.numPages; p++) {
           newPages.push({ type: 'pdf', file, name: file.name, dir, pageNum: p });
         }
-        await doc.destroy();
+        opened.set(file, doc);
+        if (opened.size > 3) { const k = opened.keys().next().value; try { opened.get(k).destroy(); } catch (e) {} opened.delete(k); }
       } catch (err) {
         console.error('PDF読込失敗:', file.name, err);
         failed++;
@@ -696,12 +695,14 @@ async function openEntries(list) {
   hideLoading();
 
   if (!newPages.length) {
+    opened.forEach((d) => { try { d.destroy(); } catch (e) {} });
     showToast(skippedPdf ? 'PDFを読むには pdf.min.js が必要です' : '読み込めるファイルがありませんでした');
     return;
   }
 
   // 前の内容を片付けてから切り替え
   resetViewerState();
+  opened.forEach((d, f) => cachedDocs.set(f, Promise.resolve(d)));
   pagesList = newPages;
   currentIndex = 0;
   slider.max = pagesList.length - 1;
@@ -723,7 +724,9 @@ async function openEntries(list) {
 
 function resetViewerState() {
   renderToken++;
-  cachedDocs.forEach((doc) => { try { doc.destroy(); } catch (e) {} });
+  cancelRenders();
+  pageCache.clear();
+  cachedDocs.forEach((p) => p.then((doc) => doc.destroy()).catch(() => {}));
   cachedDocs.clear();
   releaseUrl(1); releaseUrl(2);
   pagesList = [];
@@ -736,17 +739,71 @@ function releaseUrl(n) {
 /* =========================================================
  * 7. 描画
  * ======================================================= */
-async function getPdfDoc(file) {
-  if (cachedDocs.has(file)) return cachedDocs.get(file);
+function getPdfDoc(file) {
+  if (cachedDocs.has(file)) { // 使った順に並べ替え（古いものから破棄するため）
+    const hit = cachedDocs.get(file); cachedDocs.delete(file); cachedDocs.set(file, hit); return hit;
+  }
   if (cachedDocs.size >= 3) {
     const oldest = cachedDocs.keys().next().value;
-    try { cachedDocs.get(oldest).destroy(); } catch (e) {}
+    cachedDocs.get(oldest).then((d) => d.destroy()).catch(() => {});
     cachedDocs.delete(oldest);
   }
-  const buf = await file.arrayBuffer();
-  const doc = await pdfjsLib.getDocument(pdfOptions(buf)).promise;
-  cachedDocs.set(file, doc);
-  return doc;
+  const p = file.arrayBuffer().then((buf) => pdfjsLib.getDocument(pdfOptions(buf)).promise);
+  p.catch(() => cachedDocs.delete(file));
+  cachedDocs.set(file, p);
+  return p;
+}
+
+// 描画済みページの小さなキャッシュ（めくり戻し・先読み用）と、描画の中断
+const pageCache = new Map();
+const fileIds = new WeakMap();
+let fileSeq = 0;
+const activeTasks = new Set();
+function fileId(f) { if (!fileIds.has(f)) fileIds.set(f, ++fileSeq); return fileIds.get(f); }
+function cancelRenders() { activeTasks.forEach((t) => { try { t.cancel(); } catch (e) {} }); }
+
+async function getPdfCanvas(item, half) {
+  const doc = await getPdfDoc(item.file);
+  const page = await doc.getPage(item.pageNum);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const { w, h } = stageSize();
+  const targetW = (half ? (w - 2) / 2 : w) * dpr;
+  const targetH = h * dpr;
+  const base = page.getViewport({ scale: 1 });
+  const scale = Math.min(targetW / base.width, targetH / base.height);
+  const viewport = page.getViewport({ scale });
+  const key = fileId(item.file) + ':' + item.pageNum + ':' + Math.floor(viewport.width) + 'x' + Math.floor(viewport.height);
+  if (pageCache.has(key)) { const c = pageCache.get(key); pageCache.delete(key); pageCache.set(key, c); return c; }
+
+  // 裏のcanvasに描いてから差し替える（ちらつき防止）
+  const off = document.createElement('canvas');
+  off.width = Math.floor(viewport.width);
+  off.height = Math.floor(viewport.height);
+  const task = page.render({ canvasContext: off.getContext('2d', { alpha: false }), viewport });
+  activeTasks.add(task);
+  try { await task.promise; }
+  catch (e) { if (e && e.name === 'RenderingCancelledException') return null; throw e; }
+  finally { activeTasks.delete(task); }
+  pageCache.set(key, off);
+  while (pageCache.size > 5) pageCache.delete(pageCache.keys().next().value);
+  return off;
+}
+
+// 表示が落ち着いたら、次のページを裏で描いておく（めくった瞬間に出る）
+let prefetchTimer;
+function schedulePrefetch(token) {
+  clearTimeout(prefetchTimer);
+  prefetchTimer = setTimeout(async () => {
+    const base = currentIndex + (isSpread ? 2 : 1);
+    const targets = isSpread ? [base, base + 1] : [base];
+    const half = isSpread && !!pagesList[base + 1];
+    for (const idx of targets) {
+      const it = pagesList[idx];
+      if (!it || it.type !== 'pdf') continue;
+      if (token !== renderToken) return;
+      try { await getPdfCanvas(it, half); } catch (e) {}
+    }
+  }, 350);
 }
 
 function stageSize() {
@@ -782,24 +839,8 @@ async function renderSlot(n, item, half, token) {
     canvas.style.display = 'none';
     slot.style.display = 'flex';
   } else {
-    const doc = await getPdfDoc(item.file);
-    const page = await doc.getPage(item.pageNum);
-    if (token !== renderToken) return;
-
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const { w, h } = stageSize();
-    const targetW = (half ? (w - 2) / 2 : w) * dpr;
-    const targetH = h * dpr;
-    const base = page.getViewport({ scale: 1 });
-    const scale = Math.min(targetW / base.width, targetH / base.height);
-    const viewport = page.getViewport({ scale });
-
-    // 裏のcanvasに描いてから差し替える（ちらつき防止）
-    const off = document.createElement('canvas');
-    off.width = Math.floor(viewport.width);
-    off.height = Math.floor(viewport.height);
-    await page.render({ canvasContext: off.getContext('2d', { alpha: false }), viewport }).promise;
-    if (token !== renderToken) return;
+    const off = await getPdfCanvas(item, half);
+    if (!off || token !== renderToken) return;
 
     canvas.width = off.width;
     canvas.height = off.height;
@@ -815,6 +856,7 @@ async function renderSlot(n, item, half, token) {
 async function renderCurrentView() {
   if (!pagesList.length) return;
   const token = ++renderToken;
+  cancelRenders();
 
   const item1 = pagesList[currentIndex];
   const item2 = (isSpread && currentIndex + 1 < pagesList.length) ? pagesList[currentIndex + 1] : null;
@@ -835,7 +877,7 @@ async function renderCurrentView() {
   container.classList.toggle('spread-mode', !!item2);
 
   const hasPdf = item1.type === 'pdf' || (item2 && item2.type === 'pdf');
-  if (hasPdf) showLoading('ページを描画中…', 0.5);
+  const loadTimer = hasPdf ? setTimeout(() => showLoading('ページを描画中…', 0.5), 250) : 0;
   try {
     await Promise.all([
       renderSlot(1, item1, !!item2, token),
@@ -845,7 +887,8 @@ async function renderCurrentView() {
     console.error(err);
     if (token === renderToken) showToast('このページを表示できませんでした');
   }
-  if (hasPdf && token === renderToken) hideLoading();
+  clearTimeout(loadTimer);
+  if (hasPdf && token === renderToken) { hideLoading(); schedulePrefetch(token); }
 }
 
 /* =========================================================
@@ -923,9 +966,12 @@ $('dir-btn').onclick = () => {
   updateModeUI();
   renderCurrentView();
 };
+let sliderTimer;
 slider.oninput = (e) => {
   currentIndex = parseInt(e.target.value, 10);
-  renderCurrentView();
+  $('page-info').textContent = `${currentIndex + 1} / ${pagesList.length}`;
+  clearTimeout(sliderTimer);
+  sliderTimer = setTimeout(renderCurrentView, 120);
 };
 
 function showHintOnce() {
