@@ -1,8 +1,11 @@
 // Service Worker: アプリ本体をキャッシュしてオフラインでも起動できるようにする
 // index.html などを更新したら VERSION を上げると、古いキャッシュが消えて確実に入れ替わる
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = 'reader-' + VERSION;
 const CORE = ['./', 'index.html', 'manifest.json', 'icon.png', 'pdf.min.js', 'pdf.worker.min.js'];
+// CDN（pdf.jsのcMap・予備のpdf.js）は専用キャッシュに保存。VERSIONを上げても消えない
+const CDN_CACHE = 'cdn-assets-v1';
+const CDN_HOSTS = ['cdnjs.cloudflare.com', 'cdn.jsdelivr.net'];
 const INDEX_URL = new URL('index.html', self.registration.scope).href;
 
 self.addEventListener('install', (e) => {
@@ -39,8 +42,8 @@ async function networkFirst(request, cacheKey, timeoutMs) {
   }
 }
 
-async function cacheFirst(request) {
-  const cache = await caches.open(CACHE);
+async function cacheFirst(request, cacheName = CACHE) {
+  const cache = await caches.open(cacheName);
   const hit = await cache.match(request);
   if (hit) return hit;
   const res = await fetch(request);
@@ -53,9 +56,9 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
-  // CDN（pdf.jsの予備読み込み）は一度取れたら使い回す
+  // CDN（pdf.jsの予備読み込み・cMap・標準フォント）は一度取れたら使い回す
   if (url.origin !== self.location.origin) {
-    if (url.hostname === 'cdnjs.cloudflare.com') e.respondWith(cacheFirst(req));
+    if (CDN_HOSTS.includes(url.hostname)) e.respondWith(cacheFirst(req, CDN_CACHE));
     return;
   }
 

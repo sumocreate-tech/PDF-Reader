@@ -1,7 +1,7 @@
 {
-  "name": "マンガ・画像・PDFリーダー",
-  "short_name": "リーダー",
-  "description": "端末内の画像・PDFをオフラインで読めるリーダー",
+  "name": "PDFリーダー",
+  "short_name": "PDFリーダー",
+  "description": "端末内のPDF・画像をオフラインで読めるリーダー",
   "lang": "ja",
   "start_url": "./index.html",
   "scope": "./",

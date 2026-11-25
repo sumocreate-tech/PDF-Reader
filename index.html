@@ -6,12 +6,12 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="リーダー">
+<meta name="apple-mobile-web-app-title" content="PDFリーダー">
 <meta name="theme-color" content="#0e0f12">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon.png">
 <link rel="icon" type="image/png" href="icon.png">
-<title>マンガ・画像・PDFリーダー</title>
+<title>PDFリーダー</title>
 <style>
   :root {
     --bg: #0e0f12;
@@ -20,8 +20,9 @@
     --line: rgba(255, 255, 255, 0.09);
     --text: #f3f4f6;
     --muted: #9aa1ad;
-    --accent: #e60012;
-    --accent-soft: rgba(230, 0, 18, 0.16);
+    --accent: #6cc4b1;
+    --accent-soft: rgba(108, 196, 177, 0.18);
+    --on-accent: #0c1f1b;
     --bar: rgba(20, 21, 26, 0.88);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -54,7 +55,7 @@
       max(20px, env(safe-area-inset-bottom))
       max(20px, env(safe-area-inset-left));
     background:
-      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(230, 0, 18, 0.18), transparent 70%),
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(108, 196, 177, 0.16), transparent 70%),
       var(--bg);
   }
   .setup-card {
@@ -102,7 +103,7 @@
     transition: transform 0.08s, background 0.15s;
   }
   .btn:active { transform: scale(0.98); }
-  .btn-primary { background: var(--accent); color: #fff; box-shadow: 0 8px 22px rgba(230, 0, 18, 0.35); }
+  .btn-primary { background: var(--accent); color: var(--on-accent); box-shadow: 0 8px 22px rgba(108, 196, 177, 0.28); }
   .btn-secondary { background: var(--panel2); border-color: var(--line); color: var(--text); }
 
   .drop {
@@ -132,7 +133,7 @@
   details.help summary::after { content: "＋"; color: var(--muted); }
   details.help[open] summary::after { content: "－"; }
   details.help ul { padding: 0 16px 14px 34px; display: grid; gap: 8px; line-height: 1.6; }
-  input[type="file"] { display: none; }
+  input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
 
   /* ========== ビューア ========== */
   #viewer-screen { display: none; position: absolute; inset: 0; background: #000; }
@@ -217,7 +218,7 @@
     cursor: pointer;
     white-space: nowrap;
   }
-  .pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .pill.active { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
   .pill:active { transform: scale(0.96); }
 
   #page-info {
@@ -305,7 +306,7 @@
   #toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
   #toast button {
     background: var(--accent); border: 0; border-radius: 8px;
-    padding: 6px 12px; font-size: 12px; font-weight: 700; color: #fff; cursor: pointer;
+    padding: 6px 12px; font-size: 12px; font-weight: 700; color: var(--on-accent); cursor: pointer;
     white-space: nowrap;
   }
 </style>
@@ -316,7 +317,7 @@
   <main id="setup-screen">
     <div class="setup-card">
       <img class="app-icon" src="icon.png" alt="" onerror="this.style.visibility='hidden'">
-      <h1>マンガ・画像・PDFリーダー</h1>
+      <h1>PDFリーダー</h1>
       <p class="sub">端末の中だけで読む。通信なし・オフライン対応</p>
       <div class="chip" id="engine-status">準備中…</div>
 
@@ -338,7 +339,8 @@
         <ul>
           <li>対応形式: WebP / JPG / PNG / GIF / AVIF / BMP / SVG / PDF</li>
           <li>フォルダを選ぶと、サブフォルダも含めて 1, 2, 10 の自然順で並べて開きます。</li>
-          <li>端末によってフォルダ選択が効かない場合は、「ファイルを選ぶ」でフォルダ内を全選択するか、ドラッグ＆ドロップを使ってください。</li>
+          <li>フォルダ選択が使えない端末（iOS 18.3 以前など）では、「ファイルを選ぶ」でフォルダ内を全選択するか、ドラッグ＆ドロップを使ってください。</li>
+          <li>日本語のPDFを初めて開くときだけ、文字データ（cMap）を取得するためネット接続が必要です。一度開けば以降はオフラインでも表示できます。</li>
           <li>操作: 左右タップでページ送り、中央タップでメニュー、左右スワイプも使えます。</li>
           <li>オフライン: 初回だけネットに繋いで開けば、以降は機内モードでも起動できます。ファイルはどこにも送信されません。</li>
         </ul>
@@ -346,7 +348,7 @@
     </div>
   </main>
 
-  <input type="file" id="folder-input" webkitdirectory directory multiple>
+  <input type="file" id="folder-input" webkitdirectory>
   <input type="file" id="files-input" accept="image/*,.webp,.avif,.pdf,application/pdf" multiple>
 
   <!-- ビューア -->
@@ -466,6 +468,23 @@ const PDFJS_LOCAL = 'pdf.min.js';
 const PDFJS_WORKER_LOCAL = 'pdf.worker.min.js';
 const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
 const PDFJS_WORKER_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+// 日本語PDFの文字を表示するための cMap と標準フォント（pdf.js と同じバージョンを使うこと）
+// これが無いと、日本語フォントが読めず「文字だけ消えた」表示になる
+const PDFJS_DATA_BASE = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/';
+function pdfOptions(buf) {
+  return {
+    data: new Uint8Array(buf),
+    cMapUrl: PDFJS_DATA_BASE + 'cmaps/',
+    cMapPacked: true,
+    standardFontDataUrl: PDFJS_DATA_BASE + 'standard_fonts/',
+  };
+}
+// よく使う日本語cMapを先に取得しておく（Service Workerが保存し、次回からオフラインでも使える）
+function prefetchCMaps() {
+  if (!navigator.onLine) return;
+  ['Adobe-Japan1-UCS2', 'UniJIS-UCS2-H', 'UniJIS-UTF16-H', '90ms-RKSJ-H']
+    .forEach((n) => fetch(PDFJS_DATA_BASE + 'cmaps/' + n + '.bcmap').catch(() => {}));
+}
 let pdfJsReady = false;
 
 function loadScript(src) {
@@ -493,6 +512,7 @@ async function loadPdfJs() {
       pdfjsLib.GlobalWorkerOptions.workerSrc = worker;
       pdfJsReady = true;
       setStatus('画像・PDF どちらも読めます', 'ok');
+      setTimeout(prefetchCMaps, 3000);
       return;
     } catch (e) {}
   }
@@ -525,7 +545,39 @@ const slider = $('page-slider');
 /* =========================================================
  * 5. ファイルの受け取り（ファイル選択 / フォルダ選択 / ドラッグ＆ドロップ）
  * ======================================================= */
-$('select-folder-btn').onclick = () => $('folder-input').click();
+$('select-folder-btn').onclick = pickFolder;
+
+// Android の Chrome は <input webkitdirectory> でフォルダを選べないので、
+// フォルダ選択ダイアログ（File System Access API）を使う。それ以外は <input webkitdirectory>。
+async function pickFolder() {
+  const useDirPicker = !!window.showDirectoryPicker && /Android/i.test(navigator.userAgent);
+  if (useDirPicker) {
+    let out = null;
+    try {
+      const dir = await window.showDirectoryPicker({ id: 'pdf-reader' });
+      showLoading('フォルダを読み込み中…', 0.1);
+      out = [];
+      await walkDirHandle(dir, dir.name + '/', out);
+    } catch (err) {
+      out = null;
+      if (err && err.name === 'AbortError') { hideLoading(); return; } // キャンセル
+    }
+    hideLoading();
+    if (out) { await openEntries(out); return; }
+  }
+  $('folder-input').click();
+}
+async function walkDirHandle(dirHandle, base, out) {
+  for await (const [name, h] of dirHandle.entries()) {
+    if (name.startsWith('.')) continue;
+    if (h.kind === 'file') {
+      if (!IMAGE_EXTS.test(name) && !PDF_EXT.test(name)) continue;
+      out.push({ file: await h.getFile(), path: base + name });
+    } else if (h.kind === 'directory') {
+      await walkDirHandle(h, base + name + '/', out);
+    }
+  }
+}
 $('select-files-btn').onclick = () => $('files-input').click();
 $('folder-input').onchange = handleInput;
 $('files-input').onchange = handleInput;
@@ -628,7 +680,7 @@ async function openEntries(list) {
       showLoading(`ファイルを解析中 (${i + 1} / ${items.length})`, i / items.length);
       try {
         const buf = await file.arrayBuffer();
-        const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+        const doc = await pdfjsLib.getDocument(pdfOptions(buf)).promise;
         for (let p = 1; p <= doc.numPages; p++) {
           newPages.push({ type: 'pdf', file, name: file.name, dir, pageNum: p });
         }
@@ -692,7 +744,7 @@ async function getPdfDoc(file) {
     cachedDocs.delete(oldest);
   }
   const buf = await file.arrayBuffer();
-  const doc = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+  const doc = await pdfjsLib.getDocument(pdfOptions(buf)).promise;
   cachedDocs.set(file, doc);
   return doc;
 }
